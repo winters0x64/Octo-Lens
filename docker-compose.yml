@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: patmonitor
+      POSTGRES_USER: patmonitor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U patmonitor -d patmonitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pat-monitor:
+    build: .
+    image: ghcr.io/th3-j0k3r/github-pat-monitor:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://patmonitor:${POSTGRES_PASSWORD:-changeme}@postgres:5432/patmonitor?sslmode=disable
+    volumes:
+      - ./policy.yaml:/app/policy.yaml:ro
+      - ./private-key.pem:/app/private-key.pem:ro
+    command:
+      - serve
+      - --addr=0.0.0.0
+      - --port=8080
+      - --scan-interval=1h
+      - --policy=/app/policy.yaml
+
+volumes:
+  pgdata:

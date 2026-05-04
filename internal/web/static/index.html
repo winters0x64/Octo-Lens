@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub PAT Monitor</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="auth-overlay" style="display:none">
+    <div class="auth-box">
+      <h2>Authentication Required</h2>
+      <p>Enter your access token to continue.</p>
+      <input type="password" id="auth-input" placeholder="Bearer token">
+      <button id="auth-submit">Sign In</button>
+      <p id="auth-error" style="color:var(--risk-high);margin-top:0.5rem;display:none"></p>
+    </div>
+  </div>
+
+  <header>
+    <h1>GitHub PAT Monitor</h1>
+    <div class="meta">
+      <span id="org-name"></span>
+      <span id="scan-time"></span>
+      <button class="btn btn-primary" id="rescan-btn">Rescan</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="cards" id="summary-cards"></div>
+
+    <nav class="tab-nav" id="tab-nav">
+      <button class="active" data-tab="tab-pats">PATs <span class="count" id="count-pats">0</span></button>
+      <button data-tab="tab-apps">Apps <span class="count" id="count-apps">0</span></button>
+      <button data-tab="tab-requests" style="display:none">Pending <span class="count warn" id="count-requests">0</span></button>
+      <button data-tab="tab-sso" style="display:none">SSO Credentials <span class="count" id="count-sso">0</span></button>
+      <button data-tab="tab-secrets" style="display:none">Secrets <span class="count" id="count-secrets">0</span></button>
+      <button data-tab="tab-deploy-keys" style="display:none">Deploy Keys <span class="count" id="count-deploy-keys">0</span></button>
+      <button data-tab="tab-workflow-perms" style="display:none">GITHUB_TOKEN <span class="count" id="count-workflow-perms">0</span></button>
+      <button data-tab="tab-workflow-files" style="display:none">Workflow Audit <span class="count" id="count-workflow-files">0</span></button>
+      <button data-tab="tab-violations" style="display:none">Violations <span class="count danger" id="count-violations">0</span></button>
+      <button data-tab="tab-compliance">Compliance</button>
+      <button data-tab="tab-audit-log">Audit Log</button>
+    </nav>
+
+    <div class="tab-content active" id="tab-pats">
+      <div class="section" id="pats-section">
+        <div class="section-header">
+          <h2>Fine-Grained Personal Access Tokens</h2>
+          <input type="text" class="filter-input" id="pats-filter" placeholder="Filter PATs...">
+        </div>
+        <table id="pats-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-apps">
+      <div class="section" id="apps-section">
+        <div class="section-header">
+          <h2>Installed GitHub Apps</h2>
+          <input type="text" class="filter-input" id="apps-filter" placeholder="Filter apps...">
+        </div>
+        <table id="apps-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-requests">
+      <div class="section" id="requests-section">
+        <div class="section-header">
+          <h2>Pending PAT Requests</h2>
+        </div>
+        <table id="requests-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-sso">
+      <div class="section" id="sso-section">
+        <div class="section-header">
+          <h2>SSO Authorized Credentials (Classic PATs &amp; SSH Keys)</h2>
+          <input type="text" class="filter-input" id="sso-filter" placeholder="Filter credentials...">
+        </div>
+        <table id="sso-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-secrets">
+      <div class="section" id="secrets-section">
+        <div class="section-header">
+          <h2>Actions Secrets</h2>
+          <input type="text" class="filter-input" id="secrets-filter" placeholder="Filter secrets...">
+        </div>
+        <table id="secrets-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-deploy-keys">
+      <div class="section" id="deploy-keys-section">
+        <div class="section-header">
+          <h2>Deploy Keys</h2>
+          <input type="text" class="filter-input" id="deploy-keys-filter" placeholder="Filter deploy keys...">
+        </div>
+        <table id="deploy-keys-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-workflow-perms">
+      <div class="section" id="workflow-perms-section">
+        <div class="section-header">
+          <h2>GITHUB_TOKEN Default Permissions</h2>
+          <input type="text" class="filter-input" id="workflow-perms-filter" placeholder="Filter repos...">
+        </div>
+        <table id="workflow-perms-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-workflow-files">
+      <div class="section" id="workflow-files-section">
+        <div class="section-header">
+          <h2>Workflow Security Audit</h2>
+          <input type="text" class="filter-input" id="workflow-files-filter" placeholder="Filter workflows...">
+        </div>
+        <table id="workflow-files-table"><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-violations">
+      <div class="section" id="violations-section">
+        <div class="section-header">
+          <h2>Policy Violations</h2>
+          <input type="text" class="filter-input" id="violations-filter" placeholder="Filter violations...">
+        </div>
+        <table id="violations-table"><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-compliance">
+      <div class="section">
+        <div class="section-header">
+          <h2>Organization Security Compliance</h2>
+        </div>
+        <div id="compliance-cards" class="compliance-grid"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-audit-log">
+      <div class="section">
+        <div class="section-header">
+          <h2>PAT Audit Log</h2>
+          <input type="text" class="filter-input" id="audit-filter" placeholder="Filter events...">
+        </div>
+        <div id="audit-status"></div>
+        <table id="audit-table"><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
