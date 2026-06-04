@@ -17,13 +17,13 @@ type rawPAT struct {
 		Login     string `json:"login"`
 		AvatarURL string `json:"avatar_url"`
 	} `json:"owner"`
-	RepositorySelection string            `json:"repository_selection"`
-	Permissions         map[string]string `json:"permissions"`
-	AccessGrantedAt     time.Time         `json:"access_granted_at"`
-	TokenExpired        bool              `json:"token_expired"`
-	TokenExpiresAt      *time.Time        `json:"token_expires_at"`
-	TokenLastUsedAt     *time.Time        `json:"token_last_used_at"`
-	TokenName           string            `json:"token_name"`
+	RepositorySelection string                       `json:"repository_selection"`
+	Permissions         map[string]map[string]string `json:"permissions"`
+	AccessGrantedAt     time.Time                    `json:"access_granted_at"`
+	TokenExpired        bool                         `json:"token_expired"`
+	TokenExpiresAt      *time.Time                   `json:"token_expires_at"`
+	TokenLastUsedAt     *time.Time                   `json:"token_last_used_at"`
+	TokenName           string                       `json:"token_name"`
 }
 
 // rawPATRequest represents a pending PAT request.
@@ -32,11 +32,11 @@ type rawPATRequest struct {
 	Owner struct {
 		Login string `json:"login"`
 	} `json:"owner"`
-	RepositorySelection string            `json:"repository_selection"`
-	Permissions         map[string]string `json:"permissions"`
-	CreatedAt           time.Time         `json:"created_at"`
-	TokenExpiresAt      *time.Time        `json:"token_expires_at"`
-	TokenName           string            `json:"token_name"`
+	RepositorySelection string                       `json:"repository_selection"`
+	Permissions         map[string]map[string]string `json:"permissions"`
+	CreatedAt           time.Time                    `json:"created_at"`
+	TokenExpiresAt      *time.Time                   `json:"token_expires_at"`
+	TokenName           string                       `json:"token_name"`
 }
 
 // ListApprovedPATs returns all approved fine-grained PATs in the organization.
@@ -203,7 +203,23 @@ func (s *GitHubService) RevokePAT(ctx context.Context, patID int64) error {
 	return nil
 }
 
-func mapToPermissions(perms map[string]string) []models.Permission {
+// mapToPermissions flattens a nested PAT permissions map (category → name → level).
+func mapToPermissions(perms map[string]map[string]string) []models.Permission {
+	var result []models.Permission
+	for _, group := range perms {
+		for name, level := range group {
+			result = append(result, models.Permission{
+				Name:  name,
+				Level: level,
+				Risk:  models.CategorizePermission(name, level),
+			})
+		}
+	}
+	return result
+}
+
+// flatMapToPermissions converts a flat name→level map (used by GitHub Apps) to permissions.
+func flatMapToPermissions(perms map[string]string) []models.Permission {
 	result := make([]models.Permission, 0, len(perms))
 	for name, level := range perms {
 		result = append(result, models.Permission{

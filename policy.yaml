@@ -1,0 +1,36 @@
+# PAT Monitor Policy
+# Comprehensive security rules for GitHub credential governance.
+# Use with: github-pat-monitor scan --policy policy.yaml
+# Or:       github-pat-monitor serve --policy policy.yaml
+
+# --- Fine-grained PAT rules ---
+pat:
+  max_expiry_days: 90          # PATs must expire within N days
+  deny_no_expiry: true         # Deny PATs with no expiration date
+  deny_all_repo_access: true   # Deny PATs with access to all repositories
+  deny_admin_permissions: true # Deny PATs with any admin-level permission
+  max_inactive_days: 30        # Flag PATs unused for N days
+
+# --- GitHub App rules ---
+app:
+  deny_all_repo_access: true   # Deny apps installed with access to all repos
+  max_high_risk_permissions: 0 # Max high-risk permissions allowed per app
+
+# --- SSO credential rules ---
+sso:
+  deny_classic_pats: false     # Flag classic PATs authorized via SSO
+
+# --- Actions secrets rules ---
+secrets:
+  deny_org_wide_visibility: true  # Deny org secrets visible to all repos
+  max_stale_days: 365             # Flag secrets not rotated in N days
+
+# --- Deploy key rules ---
+deploy_keys:
+  deny_write_access: true      # Deny deploy keys with push (write) access
+
+# --- Workflow / GITHUB_TOKEN rules ---
+workflows:
+  deny_write_all_default: true  # Deny repos with GITHUB_TOKEN default write-all
+  deny_unpinned_actions: true   # Deny workflows using tag-based action refs (not SHA-pinned)
+  deny_can_approve_prs: true    # Deny repos where GITHUB_TOKEN can approve PRs

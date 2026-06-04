@@ -14,6 +14,7 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN adduser -D -h /app patmonitor
 
 COPY --from=build /github-pat-monitor /usr/local/bin/github-pat-monitor
+COPY --from=build /src/policy.yaml /app/policy.yaml
 
 USER patmonitor
 WORKDIR /app

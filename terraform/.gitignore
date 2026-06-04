@@ -1,0 +1,9 @@
+# Local state and credentials — never commit
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+.terraform/
+*.tfplan
+
+# Sensitive key files
+*.pem

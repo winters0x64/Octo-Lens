@@ -1,16 +1,15 @@
-// Package persist orchestrates the per-scan write to Postgres: it consumes
+// Package persist orchestrates the per-scan write to MySQL: it consumes
 // a scanner.Result, runs the diff against current DB rows, and applies the
 // resulting ops + events transactionally.
 package persist
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/diff"
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/policy"
@@ -29,7 +28,7 @@ func Apply(ctx context.Context, st *store.Store, result *scanner.Result, pol *po
 		return errors.New("persist.Apply: nil result/report")
 	}
 
-	return st.Tx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	return st.Tx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		flags := store.PhaseFlags{
 			PATs:         result.PATsComplete,
 			PATRequests:  result.PATRequestsComplete,
@@ -76,6 +75,33 @@ func Apply(ctx context.Context, st *store.Store, result *scanner.Result, pol *po
 			return fmt.Errorf("inserting events: %w", err)
 		}
 
+		// Cache snapshot tables — replace atomically within the same transaction.
+		if result.AppsComplete {
+			if err := store.UpsertCachedApps(ctx, tx, result.Report.Apps, now); err != nil {
+				return fmt.Errorf("upsert cached apps: %w", err)
+			}
+		}
+		if result.SecretsComplete {
+			if err := store.UpsertCachedSecrets(ctx, tx, result.Report.Secrets, now); err != nil {
+				return fmt.Errorf("upsert cached secrets: %w", err)
+			}
+		}
+		if result.DeployKeysComplete {
+			if err := store.UpsertCachedDeployKeys(ctx, tx, result.Report.DeployKeys, now); err != nil {
+				return fmt.Errorf("upsert cached deploy keys: %w", err)
+			}
+		}
+		if result.WorkflowPermsComplete {
+			if err := store.UpsertCachedWorkflowPerms(ctx, tx, result.Report.WorkflowPerms, now); err != nil {
+				return fmt.Errorf("upsert cached workflow perms: %w", err)
+			}
+		}
+		if result.WorkflowFilesComplete {
+			if err := store.UpsertCachedWorkflowFiles(ctx, tx, result.Report.WorkflowFiles, now); err != nil {
+				return fmt.Errorf("upsert cached workflow files: %w", err)
+			}
+		}
+
 		errSummary := result.PhaseErrorSummary()
 		if err := store.FinishScanRun(ctx, tx, scanRunID, time.Now(), errSummary); err != nil {
 			return fmt.Errorf("finishing scan_run: %w", err)
@@ -84,8 +110,8 @@ func Apply(ctx context.Context, st *store.Store, result *scanner.Result, pol *po
 	})
 }
 
-func applyPATs(ctx context.Context, tx pgx.Tx, result *scanner.Result, pol *policy.Policy, now time.Time) ([]store.EventWrite, error) {
-	rows, err := store.ListActivePATs(ctx, tx)
+func applyPATs(ctx context.Context, q store.Querier, result *scanner.Result, pol *policy.Policy, now time.Time) ([]store.EventWrite, error) {
+	rows, err := store.ListActivePATs(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("listing existing pats: %w", err)
 	}
@@ -107,19 +133,19 @@ func applyPATs(ctx context.Context, tx pgx.Tx, result *scanner.Result, pol *poli
 	for _, r := range results {
 		switch r.Op {
 		case diff.OpInsert:
-			if err := store.InsertPAT(ctx, tx, r.PAT, r.NewStatus, now); err != nil {
+			if err := store.InsertPAT(ctx, q, r.PAT, r.NewStatus, now); err != nil {
 				return nil, fmt.Errorf("insert pat %d: %w", r.PAT.ID, err)
 			}
 		case diff.OpUpdate:
-			if err := store.UpdatePAT(ctx, tx, r.PAT, r.NewStatus, now); err != nil {
+			if err := store.UpdatePAT(ctx, q, r.PAT, r.NewStatus, now); err != nil {
 				return nil, fmt.Errorf("update pat %d: %w", r.PAT.ID, err)
 			}
 		case diff.OpTouch:
-			if err := store.TouchPAT(ctx, tx, r.PAT.ID, now); err != nil {
+			if err := store.TouchPAT(ctx, q, r.PAT.ID, now); err != nil {
 				return nil, fmt.Errorf("touch pat %d: %w", r.PAT.ID, err)
 			}
 		case diff.OpMarkRemoved:
-			if err := store.MarkPATRemoved(ctx, tx, r.PAT.ID, now); err != nil {
+			if err := store.MarkPATRemoved(ctx, q, r.PAT.ID, now); err != nil {
 				return nil, fmt.Errorf("mark pat %d removed: %w", r.PAT.ID, err)
 			}
 		}
@@ -139,8 +165,8 @@ func applyPATs(ctx context.Context, tx pgx.Tx, result *scanner.Result, pol *poli
 	return events, nil
 }
 
-func applyPATRequests(ctx context.Context, tx pgx.Tx, result *scanner.Result, now time.Time) ([]store.EventWrite, error) {
-	rows, err := store.ListActivePATRequests(ctx, tx)
+func applyPATRequests(ctx context.Context, q store.Querier, result *scanner.Result, now time.Time) ([]store.EventWrite, error) {
+	rows, err := store.ListActivePATRequests(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("listing existing pat_requests: %w", err)
 	}
@@ -156,7 +182,7 @@ func applyPATRequests(ctx context.Context, tx pgx.Tx, result *scanner.Result, no
 	}
 
 	lookup := func(owner, name string) int64 {
-		id, err := store.FindPATByOwnerAndName(ctx, tx, owner, name)
+		id, err := store.FindPATByOwnerAndName(ctx, q, owner, name)
 		if err != nil {
 			return 0
 		}
@@ -169,19 +195,19 @@ func applyPATRequests(ctx context.Context, tx pgx.Tx, result *scanner.Result, no
 	for _, r := range results {
 		switch r.Op {
 		case diff.OpInsert:
-			if err := store.InsertPATRequest(ctx, tx, r.Request, r.NewStatus, now); err != nil {
+			if err := store.InsertPATRequest(ctx, q, r.Request, r.NewStatus, now); err != nil {
 				return nil, fmt.Errorf("insert pat_request %d: %w", r.Request.ID, err)
 			}
 		case diff.OpUpdate:
-			if err := store.UpdatePATRequest(ctx, tx, r.Request, r.NewStatus, now); err != nil {
+			if err := store.UpdatePATRequest(ctx, q, r.Request, r.NewStatus, now); err != nil {
 				return nil, fmt.Errorf("update pat_request %d: %w", r.Request.ID, err)
 			}
 		case diff.OpTouch:
-			if err := store.TouchPATRequest(ctx, tx, r.Request.ID, now); err != nil {
+			if err := store.TouchPATRequest(ctx, q, r.Request.ID, now); err != nil {
 				return nil, fmt.Errorf("touch pat_request %d: %w", r.Request.ID, err)
 			}
 		case diff.OpMarkRemoved:
-			if err := store.ResolvePATRequest(ctx, tx, r.Request.ID, r.ResolvedPATID, now); err != nil {
+			if err := store.ResolvePATRequest(ctx, q, r.Request.ID, r.ResolvedPATID, now); err != nil {
 				return nil, fmt.Errorf("resolve pat_request %d: %w", r.Request.ID, err)
 			}
 		}
@@ -200,8 +226,8 @@ func applyPATRequests(ctx context.Context, tx pgx.Tx, result *scanner.Result, no
 	return events, nil
 }
 
-func applySSOCredentials(ctx context.Context, tx pgx.Tx, result *scanner.Result, pol *policy.Policy, now time.Time) ([]store.EventWrite, error) {
-	rows, err := store.ListActiveSSOCredentials(ctx, tx)
+func applySSOCredentials(ctx context.Context, q store.Querier, result *scanner.Result, pol *policy.Policy, now time.Time) ([]store.EventWrite, error) {
+	rows, err := store.ListActiveSSOCredentials(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("listing existing sso_credentials: %w", err)
 	}
@@ -222,19 +248,19 @@ func applySSOCredentials(ctx context.Context, tx pgx.Tx, result *scanner.Result,
 	for _, r := range results {
 		switch r.Op {
 		case diff.OpInsert:
-			if err := store.InsertSSOCredential(ctx, tx, r.Credential, r.NewStatus, now); err != nil {
+			if err := store.InsertSSOCredential(ctx, q, r.Credential, r.NewStatus, now); err != nil {
 				return nil, fmt.Errorf("insert sso_credential %d: %w", r.Credential.CredentialID, err)
 			}
 		case diff.OpUpdate:
-			if err := store.UpdateSSOCredential(ctx, tx, r.Credential, r.NewStatus, now); err != nil {
+			if err := store.UpdateSSOCredential(ctx, q, r.Credential, r.NewStatus, now); err != nil {
 				return nil, fmt.Errorf("update sso_credential %d: %w", r.Credential.CredentialID, err)
 			}
 		case diff.OpTouch:
-			if err := store.TouchSSOCredential(ctx, tx, r.Credential.CredentialID, now); err != nil {
+			if err := store.TouchSSOCredential(ctx, q, r.Credential.CredentialID, now); err != nil {
 				return nil, fmt.Errorf("touch sso_credential %d: %w", r.Credential.CredentialID, err)
 			}
 		case diff.OpMarkRemoved:
-			if err := store.MarkSSOCredentialRemoved(ctx, tx, r.Credential.CredentialID, now); err != nil {
+			if err := store.MarkSSOCredentialRemoved(ctx, q, r.Credential.CredentialID, now); err != nil {
 				return nil, fmt.Errorf("mark sso_credential %d removed: %w", r.Credential.CredentialID, err)
 			}
 		}

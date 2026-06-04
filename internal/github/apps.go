@@ -97,5 +97,5 @@ func extractInstallationPermissions(perms *gh.InstallationPermissions) []models.
 	addIfSet("vulnerability_alerts", perms.VulnerabilityAlerts)
 	addIfSet("workflows", perms.Workflows)
 
-	return mapToPermissions(permMap)
+	return flatMapToPermissions(permMap)
 }

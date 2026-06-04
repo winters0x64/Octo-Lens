@@ -1,32 +1,33 @@
 services:
-  postgres:
-    image: postgres:16-alpine
+
+  mysql:
+    image: mysql:8.4
     restart: unless-stopped
     environment:
-      POSTGRES_DB: patmonitor
-      POSTGRES_USER: patmonitor
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      MYSQL_DATABASE:      patmonitor
+      MYSQL_USER:          patmonitor
+      MYSQL_PASSWORD:      ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mysqldata:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U patmonitor -d patmonitor"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-upatmonitor", "-p${MYSQL_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   pat-monitor:
     build: .
-    image: ghcr.io/th3-j0k3r/github-pat-monitor:latest
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     ports:
       - "8080:8080"
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgres://patmonitor:${POSTGRES_PASSWORD:-changeme}@postgres:5432/patmonitor?sslmode=disable
+      DATABASE_URL: patmonitor:${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}@tcp(mysql:3306)/patmonitor?parseTime=true&loc=UTC&charset=utf8mb4
     volumes:
       - ./policy.yaml:/app/policy.yaml:ro
       - ./private-key.pem:/app/private-key.pem:ro
@@ -34,8 +35,9 @@ services:
       - serve
       - --addr=0.0.0.0
       - --port=8080
-      - --scan-interval=1h
+      - --scan-interval=30m
       - --policy=/app/policy.yaml
+      - --auto-migrate=true
 
 volumes:
-  pgdata:
+  mysqldata:
