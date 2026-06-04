@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -33,23 +34,31 @@ type Server struct {
 	scanner     *scanner.Scanner
 	store       *store.Store
 	org         string
-	authToken   string
+	password    string
+	sessions    *sessionStore
 	report      *models.OrgReport
 	mu          sync.RWMutex
 	scanLimiter *RateLimiter
 
 	// Policy and alerting
-	policy       *policy.Policy
-	slack        *notify.SlackNotifier
+	policy        *policy.Policy
+	slack         *notify.SlackNotifier
 	webhookSecret string
-	violations   []policy.Violation
-	prevReport   *models.OrgReport
+	violations    []policy.Violation
+	prevReport    *models.OrgReport
+	scanDiff      ScanDiff
+
+	// Tracks which entity phases were complete in the scan that produced prevReport.
+	// Zero-value (false) on startup suppresses first-scan "all items are new" alerts.
+	prevAppsComplete    bool
+	prevSecretsComplete bool
+	prevDKsComplete     bool
 }
 
 type Config struct {
 	Addr          string
 	Port          int
-	AuthToken     string
+	Password      string
 	TLSCert       string
 	TLSKey        string
 	Org           string
@@ -59,13 +68,14 @@ type Config struct {
 	WebhookSecret string
 }
 
-func NewServer(gh *ghservice.GitHubService, sc *scanner.Scanner, st *store.Store, org string, authToken string) *Server {
+func NewServer(gh *ghservice.GitHubService, sc *scanner.Scanner, st *store.Store, org string, password string) *Server {
 	return &Server{
 		gh:          gh,
 		scanner:     sc,
 		store:       st,
 		org:         org,
-		authToken:   authToken,
+		password:    password,
+		sessions:    newSessionStore(),
 		scanLimiter: NewRateLimiter(60 * time.Second),
 	}
 }
@@ -102,10 +112,10 @@ func ValidateConfig(cfg Config) error {
 
 	isLoopback := addr == "127.0.0.1" || addr == "localhost" || addr == "::1"
 
-	if !isLoopback && cfg.AuthToken == "" {
+	if !isLoopback && cfg.Password == "" {
 		return fmt.Errorf(
-			"refusing to start: binding to %s without --auth-token is insecure; "+
-				"set PAT_MONITOR_AUTH_TOKEN or use --auth-token, or bind to 127.0.0.1",
+			"refusing to start: binding to %s without --password is insecure; "+
+				"set PAT_MONITOR_PASSWORD or use --password, or bind to 127.0.0.1",
 			addr,
 		)
 	}
@@ -184,9 +194,18 @@ func (s *Server) runScan(ctx context.Context) {
 	report := result.Report
 	report.Org = s.org
 
+	// Atomically snapshot the previous completeness flags and rotate reports.
+	// prevAppsComplete etc. reflect whether the scan that PRODUCED prevReport
+	// was complete — used below to suppress first-boot "all items are new" alerts.
 	s.mu.Lock()
+	prevAppsWasComplete := s.prevAppsComplete
+	prevSecretsWasComplete := s.prevSecretsComplete
+	prevDKsWasComplete := s.prevDKsComplete
 	s.prevReport = s.report
 	s.report = report
+	s.prevAppsComplete = result.AppsComplete
+	s.prevSecretsComplete = result.SecretsComplete
+	s.prevDKsComplete = result.DeployKeysComplete
 	s.mu.Unlock()
 
 	log.Printf("Scan complete in %s: %d PATs, %d apps",
@@ -202,7 +221,156 @@ func (s *Server) runScan(ctx context.Context) {
 		}
 	}
 
+	diff := computeDiff(s.prevReport, report)
+	s.mu.Lock()
+	s.scanDiff = diff
+	s.mu.Unlock()
+
 	s.onScanComplete(report)
+
+	if s.slack != nil && diff.HasPrev {
+		// Filter to only genuinely new items. If the previous scan was not complete
+		// for an entity type, we have no reliable baseline — suppress to avoid
+		// "all N apps are new" spam on first boot or after a restart.
+		newApps := diff.NewApps
+		if !prevAppsWasComplete {
+			newApps = nil
+		}
+		newSecrets := diff.NewSecrets
+		if !prevSecretsWasComplete {
+			newSecrets = nil
+		}
+		newDKs := diff.NewDeployKeys
+		if !prevDKsWasComplete {
+			newDKs = nil
+		}
+
+		if len(diff.NewPATs) > 0 || len(newApps) > 0 {
+			if err := s.slack.SendNewCredentials(s.org, diff.NewPATs, newApps); err != nil {
+				log.Printf("WARNING: Slack new credentials alert failed: %v", err)
+			}
+		}
+		if len(newSecrets) > 0 || len(newDKs) > 0 {
+			if err := s.slack.SendNewInfraCredentials(s.org, newSecrets, newDKs); err != nil {
+				log.Printf("WARNING: Slack new infra credentials alert failed: %v", err)
+			}
+		}
+		if len(diff.ChangedPATs) > 0 {
+			pats := make([]models.PATInfo, len(diff.ChangedPATs))
+			fields := make([][]string, len(diff.ChangedPATs))
+			for i, c := range diff.ChangedPATs {
+				pats[i] = c.PAT
+				fields[i] = c.Fields
+			}
+			if err := s.slack.SendPermissionChanges(s.org, pats, fields); err != nil {
+				log.Printf("WARNING: Slack permission changes alert failed: %v", err)
+			}
+		}
+	}
+}
+
+// loadCachedReport reconstructs a full OrgReport from the DB cache.
+// Returns nil, nil when the DB is empty (first run — no scan has completed yet).
+func (s *Server) loadCachedReport(ctx context.Context) (*models.OrgReport, error) {
+	db := s.store.DB()
+
+	pats, err := store.ListActivePATs(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("pats: %w", err)
+	}
+	requests, err := store.ListActivePATRequests(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("pat requests: %w", err)
+	}
+	ssoCreds, err := store.ListActiveSSOCredentials(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("sso creds: %w", err)
+	}
+
+	// Treat an empty DB as "first run" — trigger a blocking scan instead.
+	if len(pats) == 0 && len(requests) == 0 && len(ssoCreds) == 0 {
+		return nil, nil
+	}
+
+	apps, err := store.ListCachedApps(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("cached apps: %w", err)
+	}
+	secrets, err := store.ListCachedSecrets(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("cached secrets: %w", err)
+	}
+	deployKeys, err := store.ListCachedDeployKeys(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("cached deploy keys: %w", err)
+	}
+	workflowPerms, err := store.ListCachedWorkflowPerms(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("cached workflow perms: %w", err)
+	}
+	workflowFiles, err := store.ListCachedWorkflowFiles(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("cached workflow files: %w", err)
+	}
+
+	patInfos := make([]models.PATInfo, len(pats))
+	for i, r := range pats {
+		patInfos[i] = r.PATInfo
+	}
+	patReqs := make([]models.PATRequest, len(requests))
+	for i, r := range requests {
+		patReqs[i] = r.PATRequest
+	}
+	ssoCredentials := make([]models.SSOCredential, len(ssoCreds))
+	for i, r := range ssoCreds {
+		ssoCredentials[i] = r.SSOCredential
+	}
+
+	report := &models.OrgReport{
+		Org:             s.org,
+		ScannedAt:       time.Now(),
+		PATs:            patInfos,
+		PendingRequests: patReqs,
+		SSOCredentials:  ssoCredentials,
+		Apps:            apps,
+		Secrets:         secrets,
+		DeployKeys:      deployKeys,
+		WorkflowPerms:   workflowPerms,
+		WorkflowFiles:   workflowFiles,
+	}
+	report.Summary = buildBasicSummary(patInfos, patReqs, ssoCredentials)
+	return report, nil
+}
+
+func buildBasicSummary(pats []models.PATInfo, requests []models.PATRequest, ssoCreds []models.SSOCredential) models.OrgSummary {
+	s := models.OrgSummary{
+		TotalPATs:       len(pats),
+		PendingRequests: len(requests),
+		SSOCredentials:  len(ssoCreds),
+	}
+	thirtyDays := time.Now().Add(30 * 24 * time.Hour)
+	for _, p := range pats {
+		if p.TokenExpired {
+			s.ExpiredPATs++
+		} else {
+			s.ActivePATs++
+		}
+		if p.TokenExpiresAt != nil && !p.TokenExpired && p.TokenExpiresAt.Before(thirtyDays) {
+			s.ExpiringSoon++
+		}
+		if p.RepositorySelection == "all" {
+			s.AllRepoAccessPATs++
+		}
+	}
+	for _, c := range ssoCreds {
+		switch c.CredentialType {
+		case "personal access token":
+			s.SSOClassicPATs++
+		case "ssh key":
+			s.SSOSSHKeys++
+		}
+	}
+	return s
 }
 
 func (s *Server) ListenAndServe(cfg Config) error {
@@ -212,7 +380,32 @@ func (s *Server) ListenAndServe(cfg Config) error {
 
 	s.Configure(cfg)
 
+	staticFS, err := fs.Sub(StaticFS, "static")
+	if err != nil {
+		return fmt.Errorf("creating static sub-filesystem: %w", err)
+	}
+
 	mux := http.NewServeMux()
+
+	// Public health check for ALB — no auth required
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// Auth routes (no session required)
+	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) {
+		data, err := fs.ReadFile(staticFS, "login.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
+	})
+	mux.HandleFunc("POST /auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
 
 	// API routes
 	mux.HandleFunc("GET /api/summary", s.handleSummary)
@@ -234,33 +427,62 @@ func (s *Server) ListenAndServe(cfg Config) error {
 	mux.HandleFunc("POST /api/pats/{id}/revoke", s.handleRevokePAT)
 	mux.HandleFunc("GET /api/compliance", s.handleCompliance)
 	mux.HandleFunc("GET /api/audit-log", s.handleAuditLog)
+	mux.HandleFunc("GET /api/diff", s.handleDiff)
+	mux.HandleFunc("GET /api/export", s.handleExport)
 
 	// Webhook endpoint (no bearer auth — uses its own signature verification)
 	mux.HandleFunc("POST /webhooks/github", s.handleWebhook)
 
-	// Static files
-	staticFS, err := fs.Sub(StaticFS, "static")
-	if err != nil {
-		return fmt.Errorf("creating static sub-filesystem: %w", err)
-	}
+	// Static files (catch-all)
 	mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 
 	// Build middleware chain
 	var handler http.Handler = mux
 	handler = SecurityHeaders(handler)
-	if s.authToken != "" {
-		handler = BearerAuth(s.authToken)(handler)
-	}
+	handler = SessionAuth(s.sessions, s.password != "")(handler)
 	handler = RedactedLogger(handler)
-
-	// Initial scan
-	s.runScan(context.Background())
 
 	// Graceful shutdown context
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Start background scheduled scanner
+	// Periodic session cleanup
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.sessions.cleanup()
+			}
+		}
+	}()
+
+	if s.store != nil {
+		if cached, err := s.loadCachedReport(context.Background()); err != nil {
+			log.Printf("WARNING: failed to load cached report from DB: %v (will scan fresh)", err)
+			s.runScan(context.Background())
+		} else if cached != nil {
+			// Full cache hit — serve immediately and refresh in background.
+			s.mu.Lock()
+			s.report = cached
+			s.mu.Unlock()
+			log.Printf("Loaded cached report from DB: %d PATs, %d apps, %d secrets, %d deploy keys",
+				len(cached.PATs), len(cached.Apps), len(cached.Secrets), len(cached.DeployKeys))
+			go s.runScan(ctx)
+		} else {
+			// First run (empty DB) — block until scan completes so the dashboard has data.
+			log.Printf("No cached data found, running initial scan...")
+			s.runScan(context.Background())
+		}
+	} else {
+		// No Postgres — blocking scan.
+		s.runScan(context.Background())
+	}
+
+	// Scheduled rescans
 	if cfg.ScanInterval > 0 {
 		go s.scheduledScan(ctx, cfg.ScanInterval)
 		log.Printf("Scheduled scanning every %s", cfg.ScanInterval)
@@ -368,6 +590,58 @@ func (s *Server) handleViolations(w http.ResponseWriter, r *http.Request) {
 		v = []policy.Violation{}
 	}
 	writeJSON(w, v)
+}
+
+// handleAuthLogin validates credentials and creates a session cookie.
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	var creds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	validUser := subtle.ConstantTimeCompare([]byte(creds.Username), []byte("admin")) == 1
+	validPass := subtle.ConstantTimeCompare([]byte(creds.Password), []byte(s.password)) == 1
+	if !validUser || !validPass {
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	sessionID, err := s.sessions.create()
+	if err != nil {
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(sessionDuration.Seconds()),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleAuthLogout destroys the session and clears the cookie.
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		s.sessions.destroy(cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 func verifyWebhookSignature(payload []byte, signature, secret string) bool {

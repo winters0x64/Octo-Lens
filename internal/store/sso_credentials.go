@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 
@@ -32,7 +33,7 @@ SELECT credential_id, login, credential_type, token_last_eight,
 FROM sso_credentials
 WHERE status <> 'removed'`
 
-	rows, err := q.Query(ctx, sqlSelect)
+	rows, err := q.QueryContext(ctx, sqlSelect)
 	if err != nil {
 		return nil, err
 	}
@@ -42,14 +43,24 @@ WHERE status <> 'removed'`
 	for rows.Next() {
 		var r SSOCredentialRow
 		var scopesJSON []byte
+		var credentialAccessedAt sql.NullTime
+		var authorizedCredentialExpAt sql.NullTime
 		if err := rows.Scan(
 			&r.CredentialID, &r.Login, &r.CredentialType, &r.TokenLastEight,
-			&r.CredentialAuthorizedAt, &r.CredentialAccessedAt,
+			&r.CredentialAuthorizedAt, &credentialAccessedAt,
 			&r.AuthorizedCredentialTitle, &r.AuthorizedCredentialNote,
-			&r.AuthorizedCredentialExpAt, &scopesJSON, &r.Fingerprint,
+			&authorizedCredentialExpAt, &scopesJSON, &r.Fingerprint,
 			&r.Status, &r.FirstSeenAt, &r.LastSeenAt, &r.LastChangedAt,
 		); err != nil {
 			return nil, err
+		}
+		if credentialAccessedAt.Valid {
+			t := credentialAccessedAt.Time
+			r.CredentialAccessedAt = &t
+		}
+		if authorizedCredentialExpAt.Valid {
+			t := authorizedCredentialExpAt.Time
+			r.AuthorizedCredentialExpAt = &t
 		}
 		if err := json.Unmarshal(scopesJSON, &r.Scopes); err != nil {
 			return nil, err
@@ -71,13 +82,13 @@ INSERT INTO sso_credentials (
     authorized_credential_title, authorized_credential_note,
     authorized_credential_expires_at, scopes, fingerprint,
     status, first_seen_at, last_seen_at, last_changed_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$13)`
-	_, err = q.Exec(ctx, sqlInsert,
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	_, err = q.ExecContext(ctx, sqlInsert,
 		c.CredentialID, c.Login, c.CredentialType, c.TokenLastEight,
 		c.CredentialAuthorizedAt, c.CredentialAccessedAt,
 		c.AuthorizedCredentialTitle, c.AuthorizedCredentialNote,
 		c.AuthorizedCredentialExpAt, scopesJSON, c.Fingerprint,
-		status, now,
+		status, now, now, now,
 	)
 	return err
 }
@@ -89,38 +100,39 @@ func UpdateSSOCredential(ctx context.Context, q Querier, c models.SSOCredential,
 	}
 	const sqlUpdate = `
 UPDATE sso_credentials SET
-    login = $2,
-    credential_type = $3,
-    token_last_eight = $4,
-    credential_authorized_at = $5,
-    credential_accessed_at = $6,
-    authorized_credential_title = $7,
-    authorized_credential_note = $8,
-    authorized_credential_expires_at = $9,
-    scopes = $10,
-    fingerprint = $11,
-    status = $12,
-    last_seen_at = $13,
-    last_changed_at = $13
-WHERE credential_id = $1`
-	_, err = q.Exec(ctx, sqlUpdate,
-		c.CredentialID, c.Login, c.CredentialType, c.TokenLastEight,
+    login = ?,
+    credential_type = ?,
+    token_last_eight = ?,
+    credential_authorized_at = ?,
+    credential_accessed_at = ?,
+    authorized_credential_title = ?,
+    authorized_credential_note = ?,
+    authorized_credential_expires_at = ?,
+    scopes = ?,
+    fingerprint = ?,
+    status = ?,
+    last_seen_at = ?,
+    last_changed_at = ?
+WHERE credential_id = ?`
+	_, err = q.ExecContext(ctx, sqlUpdate,
+		c.Login, c.CredentialType, c.TokenLastEight,
 		c.CredentialAuthorizedAt, c.CredentialAccessedAt,
 		c.AuthorizedCredentialTitle, c.AuthorizedCredentialNote,
 		c.AuthorizedCredentialExpAt, scopesJSON, c.Fingerprint,
-		status, now,
+		status, now, now,
+		c.CredentialID,
 	)
 	return err
 }
 
 func TouchSSOCredential(ctx context.Context, q Querier, id int64, now time.Time) error {
-	_, err := q.Exec(ctx, `UPDATE sso_credentials SET last_seen_at = $2 WHERE credential_id = $1`, id, now)
+	_, err := q.ExecContext(ctx, `UPDATE sso_credentials SET last_seen_at = ? WHERE credential_id = ?`, now, id)
 	return err
 }
 
 func MarkSSOCredentialRemoved(ctx context.Context, q Querier, id int64, now time.Time) error {
-	_, err := q.Exec(ctx,
-		`UPDATE sso_credentials SET status = 'removed', last_changed_at = $2, last_seen_at = $2 WHERE credential_id = $1`,
-		id, now)
+	_, err := q.ExecContext(ctx,
+		`UPDATE sso_credentials SET status = 'removed', last_changed_at = ?, last_seen_at = ? WHERE credential_id = ?`,
+		now, now, id)
 	return err
 }

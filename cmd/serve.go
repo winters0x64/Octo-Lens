@@ -16,7 +16,7 @@ import (
 var (
 	flagAddr               string
 	flagPort               int
-	flagAuthToken          string
+	flagPassword           string
 	flagTLSCert            string
 	flagTLSKey             string
 	flagScanInterval       time.Duration
@@ -42,8 +42,8 @@ When DATABASE_URL is set, scan results are persisted to Postgres with an
 append-only event log capturing status flips and watched-field changes.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Resolve from env vars
-		if flagAuthToken == "" {
-			flagAuthToken = os.Getenv("PAT_MONITOR_AUTH_TOKEN")
+		if flagPassword == "" {
+			flagPassword = os.Getenv("PAT_MONITOR_PASSWORD")
 		}
 		if flagSlackWebhook == "" {
 			flagSlackWebhook = os.Getenv("SLACK_WEBHOOK_URL")
@@ -86,12 +86,12 @@ append-only event log capturing status flips and watched-field changes.`,
 		_ = flagEventRetentionDays // wired for future pruning job; default 0 = keep forever
 
 		sc := scanner.New(ghService)
-		srv := web.NewServer(ghService, sc, st, flagOrg, flagAuthToken)
+		srv := web.NewServer(ghService, sc, st, flagOrg, flagPassword)
 
 		return srv.ListenAndServe(web.Config{
 			Addr:          flagAddr,
 			Port:          flagPort,
-			AuthToken:     flagAuthToken,
+			Password:      flagPassword,
 			TLSCert:       flagTLSCert,
 			TLSKey:        flagTLSKey,
 			Org:           flagOrg,
@@ -106,7 +106,7 @@ append-only event log capturing status flips and watched-field changes.`,
 func init() {
 	serveCmd.Flags().StringVar(&flagAddr, "addr", "127.0.0.1", "Bind address (default: 127.0.0.1, local-only)")
 	serveCmd.Flags().IntVar(&flagPort, "port", 8080, "Port to listen on")
-	serveCmd.Flags().StringVar(&flagAuthToken, "auth-token", "", "Bearer token for API auth (env: PAT_MONITOR_AUTH_TOKEN)")
+	serveCmd.Flags().StringVar(&flagPassword, "password", "", "Password for dashboard login (username: admin, env: PAT_MONITOR_PASSWORD)")
 	serveCmd.Flags().StringVar(&flagTLSCert, "tls-cert", "", "Path to TLS certificate file")
 	serveCmd.Flags().StringVar(&flagTLSKey, "tls-key", "", "Path to TLS private key file")
 	serveCmd.Flags().DurationVar(&flagScanInterval, "scan-interval", 1*time.Hour, "Auto-rescan interval (e.g. 5m, 1h, 0 to disable)")

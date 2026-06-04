@@ -3,151 +3,205 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GitHub PAT Monitor</title>
+  <title>PAT Monitor — Scapia</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div id="auth-overlay" style="display:none">
-    <div class="auth-box">
-      <h2>Authentication Required</h2>
-      <p>Enter your access token to continue.</p>
-      <input type="password" id="auth-input" placeholder="Bearer token">
-      <button id="auth-submit">Sign In</button>
-      <p id="auth-error" style="color:var(--risk-high);margin-top:0.5rem;display:none"></p>
-    </div>
-  </div>
 
-  <header>
-    <h1>GitHub PAT Monitor</h1>
-    <div class="meta">
-      <span id="org-name"></span>
-      <span id="scan-time"></span>
-      <button class="btn btn-primary" id="rescan-btn">Rescan</button>
-    </div>
-  </header>
+  <div id="scan-progress-bar" class="scan-progress-bar" style="display:none"></div>
 
-  <div class="container">
-    <div class="cards" id="summary-cards"></div>
+  <div class="app-layout">
 
-    <nav class="tab-nav" id="tab-nav">
-      <button class="active" data-tab="tab-pats">PATs <span class="count" id="count-pats">0</span></button>
-      <button data-tab="tab-apps">Apps <span class="count" id="count-apps">0</span></button>
-      <button data-tab="tab-requests" style="display:none">Pending <span class="count warn" id="count-requests">0</span></button>
-      <button data-tab="tab-sso" style="display:none">SSO Credentials <span class="count" id="count-sso">0</span></button>
-      <button data-tab="tab-secrets" style="display:none">Secrets <span class="count" id="count-secrets">0</span></button>
-      <button data-tab="tab-deploy-keys" style="display:none">Deploy Keys <span class="count" id="count-deploy-keys">0</span></button>
-      <button data-tab="tab-workflow-perms" style="display:none">GITHUB_TOKEN <span class="count" id="count-workflow-perms">0</span></button>
-      <button data-tab="tab-workflow-files" style="display:none">Workflow Audit <span class="count" id="count-workflow-files">0</span></button>
-      <button data-tab="tab-violations" style="display:none">Violations <span class="count danger" id="count-violations">0</span></button>
-      <button data-tab="tab-compliance">Compliance</button>
-      <button data-tab="tab-audit-log">Audit Log</button>
-    </nav>
-
-    <div class="tab-content active" id="tab-pats">
-      <div class="section" id="pats-section">
-        <div class="section-header">
-          <h2>Fine-Grained Personal Access Tokens</h2>
-          <input type="text" class="filter-input" id="pats-filter" placeholder="Filter PATs...">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="7" fill="#2D7FF9" fill-opacity="0.2"/><path d="M16 7L8 11.5V20.5L16 25L24 20.5V11.5L16 7Z" stroke="#2D7FF9" stroke-width="1.5" stroke-linejoin="round"/><path d="M16 7V25" stroke="#2D7FF9" stroke-width="1.5" opacity="0.35"/><path d="M8 11.5L24 20.5" stroke="#2D7FF9" stroke-width="1.5" opacity="0.35"/><path d="M24 11.5L8 20.5" stroke="#2D7FF9" stroke-width="1.5" opacity="0.35"/></svg>
+        <div class="brand-text">
+          <span class="brand-name">PAT Monitor</span>
+          <span class="brand-org" id="org-name">—</span>
         </div>
-        <table id="pats-table"><tbody></tbody></table>
       </div>
-    </div>
 
-    <div class="tab-content" id="tab-apps">
-      <div class="section" id="apps-section">
-        <div class="section-header">
-          <h2>Installed GitHub Apps</h2>
-          <input type="text" class="filter-input" id="apps-filter" placeholder="Filter apps...">
+      <nav id="sidebar-nav" class="sidebar-nav">
+        <div class="nav-group">
+          <button class="nav-item active" data-tab="tab-overview" data-title="Overview">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.25"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.25"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.25"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" stroke-width="1.25"/></svg>
+            Overview
+          </button>
         </div>
-        <table id="apps-table"><tbody></tbody></table>
-      </div>
-    </div>
 
-    <div class="tab-content" id="tab-requests">
-      <div class="section" id="requests-section">
-        <div class="section-header">
-          <h2>Pending PAT Requests</h2>
+        <div class="nav-group">
+          <div class="nav-group-label">Access</div>
+          <button class="nav-item" data-tab="tab-pats" data-title="Personal Access Tokens">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="8" r="4" stroke="currentColor" stroke-width="1.25"/><path d="M10 8h5M12 6v4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            PATs <span class="nav-badge" id="count-pats">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-apps" data-title="Installed GitHub Apps">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="3" stroke="currentColor" stroke-width="1.25"/><path d="M6 6h4M6 9h2" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            Apps <span class="nav-badge" id="count-apps">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-requests" data-title="Pending Requests" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.25"/><path d="M8 5v3.5L10 10" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            Pending <span class="nav-badge warn" id="count-requests">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-sso" data-title="SSO Credentials" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2a3 3 0 100 6 3 3 0 000-6z" stroke="currentColor" stroke-width="1.25"/><path d="M2 14c0-3.314 2.686-5 6-5s6 1.686 6 5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            SSO Creds <span class="nav-badge" id="count-sso">0</span>
+          </button>
         </div>
-        <table id="requests-table"><tbody></tbody></table>
-      </div>
-    </div>
 
-    <div class="tab-content" id="tab-sso">
-      <div class="section" id="sso-section">
-        <div class="section-header">
-          <h2>SSO Authorized Credentials (Classic PATs &amp; SSH Keys)</h2>
-          <input type="text" class="filter-input" id="sso-filter" placeholder="Filter credentials...">
+        <div class="nav-group">
+          <div class="nav-group-label">Infrastructure</div>
+          <button class="nav-item" data-tab="tab-secrets" data-title="Actions Secrets" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.25"/><path d="M5 7V5a3 3 0 016 0v2" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            Secrets <span class="nav-badge" id="count-secrets">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-deploy-keys" data-title="Deploy Keys" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M3 3h10v7a3 3 0 01-10 0V3z" stroke="currentColor" stroke-width="1.25"/><path d="M6 7h4M8 5v4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            Deploy Keys <span class="nav-badge" id="count-deploy-keys">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-workflow-perms" data-title="GITHUB_TOKEN Permissions" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            GITHUB_TOKEN <span class="nav-badge" id="count-workflow-perms">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-workflow-files" data-title="Workflow Security Audit" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6L9 2z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>
+            Workflow Audit <span class="nav-badge" id="count-workflow-files">0</span>
+          </button>
         </div>
-        <table id="sso-table"><tbody></tbody></table>
-      </div>
-    </div>
 
-    <div class="tab-content" id="tab-secrets">
-      <div class="section" id="secrets-section">
-        <div class="section-header">
-          <h2>Actions Secrets</h2>
-          <input type="text" class="filter-input" id="secrets-filter" placeholder="Filter secrets...">
+        <div class="nav-group">
+          <div class="nav-group-label">Security</div>
+          <button class="nav-item" data-tab="tab-violations" data-title="Policy Violations" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2L2 13h12L8 2z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
+            Violations <span class="nav-badge danger" id="count-violations">0</span>
+          </button>
+          <button class="nav-item" data-tab="tab-compliance" data-title="Security Compliance">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>
+            Compliance <span class="nav-badge" id="count-compliance"></span>
+          </button>
         </div>
-        <table id="secrets-table"><tbody></tbody></table>
-      </div>
-    </div>
+      </nav>
 
-    <div class="tab-content" id="tab-deploy-keys">
-      <div class="section" id="deploy-keys-section">
-        <div class="section-header">
-          <h2>Deploy Keys</h2>
-          <input type="text" class="filter-input" id="deploy-keys-filter" placeholder="Filter deploy keys...">
-        </div>
-        <table id="deploy-keys-table"><tbody></tbody></table>
+      <div class="sidebar-footer">
+        <div class="scan-meta" id="scan-time">No scan yet</div>
       </div>
-    </div>
+    </aside>
 
-    <div class="tab-content" id="tab-workflow-perms">
-      <div class="section" id="workflow-perms-section">
-        <div class="section-header">
-          <h2>GITHUB_TOKEN Default Permissions</h2>
-          <input type="text" class="filter-input" id="workflow-perms-filter" placeholder="Filter repos...">
+    <div class="main">
+      <header class="topbar">
+        <h1 class="page-title" id="page-title">Overview</h1>
+        <div class="topbar-actions">
+          <span id="scan-status" class="scan-status-badge" style="display:none">
+            <span class="scan-dot"></span> Scanning…
+          </span>
+          <button class="btn btn-primary" id="rescan-btn">Rescan</button>
+          <button class="btn btn-logout" id="logout-btn" title="Sign out">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3H3a1 1 0 00-1 1v8a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Sign out
+          </button>
         </div>
-        <table id="workflow-perms-table"><tbody></tbody></table>
-      </div>
-    </div>
+      </header>
 
-    <div class="tab-content" id="tab-workflow-files">
-      <div class="section" id="workflow-files-section">
-        <div class="section-header">
-          <h2>Workflow Security Audit</h2>
-          <input type="text" class="filter-input" id="workflow-files-filter" placeholder="Filter workflows...">
-        </div>
-        <table id="workflow-files-table"><tbody></tbody></table>
-      </div>
-    </div>
+      <div class="content">
 
-    <div class="tab-content" id="tab-violations">
-      <div class="section" id="violations-section">
-        <div class="section-header">
-          <h2>Policy Violations</h2>
-          <input type="text" class="filter-input" id="violations-filter" placeholder="Filter violations...">
+        <div class="tab-content active" id="tab-overview">
+          <div class="cards" id="summary-cards"></div>
+          <div id="diff-section" class="diff-section" style="display:none">
+            <div class="diff-header">
+              <span class="diff-title">Changes since last scan</span>
+              <span id="diff-timestamp" class="diff-timestamp"></span>
+            </div>
+            <div id="diff-content" class="diff-content"></div>
+          </div>
         </div>
-        <table id="violations-table"><tbody></tbody></table>
-      </div>
-    </div>
-    <div class="tab-content" id="tab-compliance">
-      <div class="section">
-        <div class="section-header">
-          <h2>Organization Security Compliance</h2>
-        </div>
-        <div id="compliance-cards" class="compliance-grid"></div>
-      </div>
-    </div>
 
-    <div class="tab-content" id="tab-audit-log">
-      <div class="section">
-        <div class="section-header">
-          <h2>PAT Audit Log</h2>
-          <input type="text" class="filter-input" id="audit-filter" placeholder="Filter events...">
+        <div class="tab-content" id="tab-pats">
+          <div class="section-header">
+            <h2>Fine-Grained Personal Access Tokens</h2>
+            <div class="section-actions">
+              <input type="text" class="filter-input" id="pats-filter" placeholder="Search PATs…">
+              <button class="btn btn-export" onclick="exportCSV()">Export CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap"><table id="pats-table"><tbody></tbody></table></div>
         </div>
-        <div id="audit-status"></div>
-        <table id="audit-table"><tbody></tbody></table>
+
+        <div class="tab-content" id="tab-apps">
+          <div class="section-header">
+            <h2>Installed GitHub Apps</h2>
+            <div class="section-actions">
+              <input type="text" class="filter-input" id="apps-filter" placeholder="Search apps…">
+            </div>
+          </div>
+          <div class="table-wrap"><table id="apps-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-requests">
+          <div class="section-header">
+            <h2>Pending PAT Requests</h2>
+          </div>
+          <div class="table-wrap"><table id="requests-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-sso">
+          <div class="section-header">
+            <h2>SSO Authorized Credentials</h2>
+            <input type="text" class="filter-input" id="sso-filter" placeholder="Search credentials…">
+          </div>
+          <div class="table-wrap"><table id="sso-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-secrets">
+          <div class="section-header">
+            <h2>Actions Secrets</h2>
+            <input type="text" class="filter-input" id="secrets-filter" placeholder="Search secrets…">
+          </div>
+          <div class="table-wrap"><table id="secrets-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-deploy-keys">
+          <div class="section-header">
+            <h2>Deploy Keys</h2>
+            <input type="text" class="filter-input" id="deploy-keys-filter" placeholder="Search deploy keys…">
+          </div>
+          <div class="table-wrap"><table id="deploy-keys-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-workflow-perms">
+          <div class="section-header">
+            <h2>GITHUB_TOKEN Default Permissions</h2>
+            <input type="text" class="filter-input" id="workflow-perms-filter" placeholder="Search repos…">
+          </div>
+          <div class="table-wrap"><table id="workflow-perms-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-workflow-files">
+          <div class="section-header">
+            <h2>Workflow Security Audit</h2>
+            <input type="text" class="filter-input" id="workflow-files-filter" placeholder="Search workflows…">
+          </div>
+          <div class="table-wrap"><table id="workflow-files-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-violations">
+          <div class="section-header">
+            <h2>Policy Violations</h2>
+            <input type="text" class="filter-input" id="violations-filter" placeholder="Search violations…">
+          </div>
+          <div class="table-wrap"><table id="violations-table"><tbody></tbody></table></div>
+        </div>
+
+        <div class="tab-content" id="tab-compliance">
+          <div class="section-header">
+            <h2>Security Compliance</h2>
+            <span id="compliance-score" class="compliance-score"></span>
+          </div>
+          <div id="compliance-cards" class="compliance-grid"></div>
+        </div>
+
       </div>
     </div>
   </div>

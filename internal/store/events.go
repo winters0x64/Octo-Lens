@@ -2,11 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
-	"strconv"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -32,7 +30,7 @@ type EventWrite struct {
 	PolicyViolations []string
 }
 
-// Event is the read shape, JSONB columns kept as raw to let callers decide.
+// Event is the read shape, JSON columns kept as raw to let callers decide.
 type Event struct {
 	ID               int64
 	ScanRunID        int64
@@ -47,15 +45,20 @@ type Event struct {
 	PolicyViolations json.RawMessage
 }
 
-// BatchInsertEvents writes events in a single round-trip via pgx.CopyFrom.
+// BatchInsertEvents writes events one row at a time within the transaction.
 // All rows share the same scan_run_id and occurred_at so callers don't pass them per-event.
-func BatchInsertEvents(ctx context.Context, tx pgx.Tx, scanRunID int64, occurredAt time.Time, events []EventWrite) error {
+func BatchInsertEvents(ctx context.Context, tx *sql.Tx, scanRunID int64, occurredAt time.Time, events []EventWrite) error {
 	if len(events) == 0 {
 		return nil
 	}
 
-	rows := make([][]any, len(events))
-	for i, e := range events {
+	const sqlInsert = `
+INSERT INTO events (
+    scan_run_id, occurred_at, entity_type, entity_id, event_kind,
+    old_status, new_status, changed_fields, snapshot, policy_violations
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	for _, e := range events {
 		snap, err := json.Marshal(e.Snapshot)
 		if err != nil {
 			return err
@@ -64,6 +67,13 @@ func BatchInsertEvents(ctx context.Context, tx pgx.Tx, scanRunID int64, occurred
 		if err != nil {
 			return err
 		}
+
+		changed := orEmpty(e.ChangedFields)
+		changedJSON, err := json.Marshal(changed)
+		if err != nil {
+			return err
+		}
+
 		var oldStatus, newStatus any
 		if e.OldStatus != "" {
 			oldStatus = e.OldStatus
@@ -71,25 +81,15 @@ func BatchInsertEvents(ctx context.Context, tx pgx.Tx, scanRunID int64, occurred
 		if e.NewStatus != "" {
 			newStatus = e.NewStatus
 		}
-		changed := e.ChangedFields
-		if changed == nil {
-			changed = []string{}
-		}
-		rows[i] = []any{
+
+		if _, err := tx.ExecContext(ctx, sqlInsert,
 			scanRunID, occurredAt, e.EntityType, e.EntityID, e.Kind,
-			oldStatus, newStatus, changed, snap, viol,
+			oldStatus, newStatus, string(changedJSON), string(snap), string(viol),
+		); err != nil {
+			return err
 		}
 	}
-
-	_, err := tx.CopyFrom(ctx,
-		pgx.Identifier{"events"},
-		[]string{
-			"scan_run_id", "occurred_at", "entity_type", "entity_id", "event_kind",
-			"old_status", "new_status", "changed_fields", "snapshot", "policy_violations",
-		},
-		pgx.CopyFromRows(rows),
-	)
-	return err
+	return nil
 }
 
 // ListEventsByEntity returns events for a single entity, newest first.
@@ -101,10 +101,10 @@ func ListEventsByEntity(ctx context.Context, q Querier, entityType, entityID str
 SELECT id, scan_run_id, occurred_at, entity_type, entity_id, event_kind,
        old_status, new_status, changed_fields, snapshot, policy_violations
 FROM events
-WHERE entity_type = $1 AND entity_id = $2
+WHERE entity_type = ? AND entity_id = ?
 ORDER BY occurred_at DESC
-LIMIT $3`
-	rows, err := q.Query(ctx, sqlSelect, entityType, entityID, limit)
+LIMIT ?`
+	rows, err := q.QueryContext(ctx, sqlSelect, entityType, entityID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -133,20 +133,20 @@ WHERE 1=1`
 	args := []any{}
 	if f.Since != nil {
 		args = append(args, *f.Since)
-		sqlStr += " AND occurred_at >= $" + strconv.Itoa(len(args))
+		sqlStr += " AND occurred_at >= ?"
 	}
 	if f.EntityType != "" {
 		args = append(args, f.EntityType)
-		sqlStr += " AND entity_type = $" + strconv.Itoa(len(args))
+		sqlStr += " AND entity_type = ?"
 	}
 	if f.Kind != "" {
 		args = append(args, f.Kind)
-		sqlStr += " AND event_kind = $" + strconv.Itoa(len(args))
+		sqlStr += " AND event_kind = ?"
 	}
 	args = append(args, f.Limit)
-	sqlStr += " ORDER BY occurred_at DESC LIMIT $" + strconv.Itoa(len(args))
+	sqlStr += " ORDER BY occurred_at DESC LIMIT ?"
 
-	rows, err := q.Query(ctx, sqlStr, args...)
+	rows, err := q.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -154,16 +154,37 @@ WHERE 1=1`
 	return scanEvents(rows)
 }
 
-func scanEvents(rows pgx.Rows) ([]Event, error) {
+func scanEvents(rows *sql.Rows) ([]Event, error) {
 	var out []Event
 	for rows.Next() {
 		var e Event
+		var oldStatus, newStatus sql.NullString
+		var changedFieldsJSON []byte
+		var snapshotJSON []byte
+		var policyViolationsJSON []byte
+
 		if err := rows.Scan(
 			&e.ID, &e.ScanRunID, &e.OccurredAt, &e.EntityType, &e.EntityID, &e.Kind,
-			&e.OldStatus, &e.NewStatus, &e.ChangedFields, &e.Snapshot, &e.PolicyViolations,
+			&oldStatus, &newStatus, &changedFieldsJSON, &snapshotJSON, &policyViolationsJSON,
 		); err != nil {
 			return nil, err
 		}
+
+		if oldStatus.Valid {
+			s := oldStatus.String
+			e.OldStatus = &s
+		}
+		if newStatus.Valid {
+			s := newStatus.String
+			e.NewStatus = &s
+		}
+
+		if err := json.Unmarshal(changedFieldsJSON, &e.ChangedFields); err != nil {
+			e.ChangedFields = []string{}
+		}
+		e.Snapshot = json.RawMessage(snapshotJSON)
+		e.PolicyViolations = json.RawMessage(policyViolationsJSON)
+
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -175,4 +196,3 @@ func orEmpty(s []string) []string {
 	}
 	return s
 }
-

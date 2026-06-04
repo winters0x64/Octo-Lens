@@ -21,7 +21,7 @@ func (s *Server) handlePATHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := parseLimit(r, 100)
 
-	events, err := store.ListEventsByEntity(r.Context(), s.store.Pool(), store.EventEntityPAT, idStr, limit)
+	events, err := store.ListEventsByEntity(r.Context(), s.store.DB(), store.EventEntityPAT, idStr, limit)
 	if err != nil {
 		http.Error(w, `{"error":"history query failed"}`, http.StatusInternalServerError)
 		return
@@ -51,7 +51,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		filter.Since = &t
 	}
 
-	events, err := store.ListEvents(r.Context(), s.store.Pool(), filter)
+	events, err := store.ListEvents(r.Context(), s.store.DB(), filter)
 	if err != nil {
 		http.Error(w, `{"error":"events query failed"}`, http.StatusInternalServerError)
 		return
@@ -77,7 +77,7 @@ func (s *Server) handlePATsHistorical(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid status (active|expired|removed)"}`, http.StatusBadRequest)
 		return
 	}
-	rows, err := store.ListPATsByStatus(r.Context(), s.store.Pool(), status)
+	rows, err := store.ListPATsByStatus(r.Context(), s.store.DB(), status)
 	if err != nil {
 		http.Error(w, `{"error":"pats query failed"}`, http.StatusInternalServerError)
 		return

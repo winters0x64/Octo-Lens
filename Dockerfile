@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS build
+FROM golang:1.26.4-alpine AS build
 
 RUN apk add --no-cache git ca-certificates
 
@@ -14,6 +14,7 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN adduser -D -h /app patmonitor
 
 COPY --from=build /github-pat-monitor /usr/local/bin/github-pat-monitor
+COPY --from=build /src/policy.yaml /app/policy.yaml
 
 USER patmonitor
 WORKDIR /app

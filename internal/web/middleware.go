@@ -1,7 +1,6 @@
 package web
 
 import (
-	"crypto/subtle"
 	"log"
 	"net/http"
 	"strings"
@@ -9,25 +8,35 @@ import (
 	"time"
 )
 
-// BearerAuth returns middleware that requires a valid bearer token for /api/* routes.
-func BearerAuth(token string) func(http.Handler) http.Handler {
+// SessionAuth returns middleware that enforces session-cookie auth on protected routes.
+// Public paths (login page, auth endpoints, static assets, webhooks) are exempt.
+func SessionAuth(sessions *sessionStore, requireAuth bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
+		if !requireAuth {
+			return next
+		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Only protect API routes
-			if !strings.HasPrefix(r.URL.Path, "/api/") {
+			path := r.URL.Path
+
+			// Paths that never require a session
+			if path == "/login" ||
+				path == "/health" ||
+				strings.HasPrefix(path, "/auth/") ||
+				strings.HasPrefix(path, "/css/") ||
+				strings.HasPrefix(path, "/js/") ||
+				path == "/webhooks/github" {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			auth := r.Header.Get("Authorization")
-			if auth == "" {
-				http.Error(w, `{"error":"authorization required"}`, http.StatusUnauthorized)
-				return
-			}
-
-			provided := strings.TrimPrefix(auth, "Bearer ")
-			if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
-				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			cookie, err := r.Cookie(sessionCookieName)
+			if err != nil || !sessions.valid(cookie.Value) {
+				if strings.HasPrefix(path, "/api/") {
+					w.Header().Set("Content-Type", "application/json")
+					http.Error(w, `{"error":"session expired"}`, http.StatusUnauthorized)
+				} else {
+					http.Redirect(w, r, "/login", http.StatusFound)
+				}
 				return
 			}
 
@@ -39,7 +48,7 @@ func BearerAuth(token string) func(http.Handler) http.Handler {
 // SecurityHeaders adds CSP, CORS, and other security headers.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://avatars.githubusercontent.com")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https://avatars.githubusercontent.com")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -47,7 +56,6 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		// CORS: deny all cross-origin requests
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			// No Access-Control-Allow-Origin header = browser blocks the response
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusForbidden)
 				return

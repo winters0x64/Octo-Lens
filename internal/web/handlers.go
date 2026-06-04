@@ -139,14 +139,16 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	report, err := s.scanner.Scan(r.Context())
+	result, err := s.scanner.Scan(r.Context())
 	if err != nil {
 		http.Error(w, `{"error":"scan failed"}`, http.StatusInternalServerError)
 		return
 	}
+	report := result.Report
 	report.Org = s.org
 
 	s.mu.Lock()
+	s.prevReport = s.report
 	s.report = report
 	s.mu.Unlock()
 
