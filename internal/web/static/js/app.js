@@ -8,6 +8,11 @@
   let patSort  = { col: 'owner_login', asc: true };
   let appSort  = { col: 'high_risk_count', asc: false };
   let ssoSort  = { col: 'login', asc: true };
+
+  var PAGE_SIZE = 20;
+  var appPage   = 1;
+  var ssoPage   = 1;
+  var ssoTypeFilter = '';   // '' = all, 'personal access token', 'ssh key'
   let secretSort = { col: 'risk', asc: false };
   let dkSort   = { col: 'risk', asc: false };
   let wpSort   = { col: 'default_permission', asc: false };
@@ -87,9 +92,9 @@
       report = data;
       renderSummary(data.summary);
       renderPATs(data.pats);
-      renderApps(data.apps);
+      appPage = 1; renderApps(data.apps);
       renderRequests(data.pending_requests);
-      renderSSOCredentials(data.sso_credentials);
+      ssoPage = 1; renderSSOCredentials(data.sso_credentials);
       renderSecrets(data.secrets);
       renderDeployKeys(data.deploy_keys);
       renderWorkflowPerms(data.workflow_permissions);
@@ -367,6 +372,55 @@
     table.appendChild(tbody);
   }
 
+  // --- Pagination helper ---
+
+  function buildPagination(containerId, totalItems, currentPage, onPageChange) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    var totalPages = Math.ceil(totalItems / PAGE_SIZE);
+    if (totalPages <= 1) return;
+
+    function btn(label, page, active, disabled) {
+      var b = document.createElement('button');
+      b.textContent = label;
+      if (active) b.classList.add('active');
+      if (disabled) b.disabled = true;
+      b.addEventListener('click', function() { onPageChange(page); });
+      return b;
+    }
+
+    container.appendChild(btn('‹', currentPage - 1, false, currentPage === 1));
+
+    // Always show first, last, and a window around the current page
+    var pages = [];
+    for (var i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+        pages.push(i);
+      }
+    }
+    var prev = 0;
+    pages.forEach(function(p) {
+      if (prev && p - prev > 1) {
+        var ellipsis = document.createElement('button');
+        ellipsis.textContent = '…';
+        ellipsis.disabled = true;
+        container.appendChild(ellipsis);
+      }
+      container.appendChild(btn(String(p), p, p === currentPage, false));
+      prev = p;
+    });
+
+    container.appendChild(btn('›', currentPage + 1, false, currentPage === totalPages));
+
+    var info = document.createElement('span');
+    info.className = 'page-info';
+    var start = (currentPage - 1) * PAGE_SIZE + 1;
+    var end   = Math.min(currentPage * PAGE_SIZE, totalItems);
+    info.textContent = start + '–' + end + ' of ' + totalItems;
+    container.appendChild(info);
+  }
+
   // --- Apps Table ---
 
   function renderApps(apps) {
@@ -386,10 +440,15 @@
       { key: 'suspended', label: 'Status' },
     ];
 
-    table.appendChild(buildHeader(cols, appSort, function() { renderApps(report.apps); }));
+    table.appendChild(buildHeader(cols, appSort, function() { appPage = 1; renderApps(report.apps); }));
+
+    var page = sorted.slice((appPage - 1) * PAGE_SIZE, appPage * PAGE_SIZE);
+    buildPagination('apps-pagination', sorted.length, appPage, function(p) {
+      appPage = p; renderApps(apps);
+    });
 
     var tbody = document.createElement('tbody');
-    sorted.forEach(function(a) {
+    page.forEach(function(a) {
       var tr = document.createElement('tr');
       if (isNewItem(a.id, 'app')) tr.classList.add('diff-new');
 
@@ -464,11 +523,30 @@
   // --- SSO Credentials ---
 
   function renderSSOCredentials(creds) {
-    if (!creds || creds.length === 0) return;
+    if (!creds) creds = [];
 
-    var sorted = sortData(creds, ssoSort);
+    // Apply type filter
+    var filtered = ssoTypeFilter
+      ? creds.filter(function(c) { return c.credential_type === ssoTypeFilter; })
+      : creds;
+
+    var sorted = sortData(filtered, ssoSort);
     var table = document.getElementById('sso-table');
     table.innerHTML = '';
+
+    if (sorted.length === 0) {
+      var empty = document.createElement('tbody');
+      var row = document.createElement('tr');
+      var cell = document.createElement('td');
+      cell.colSpan = 8;
+      cell.className = 'empty-state';
+      cell.textContent = 'No credentials match the current filter.';
+      row.appendChild(cell);
+      empty.appendChild(row);
+      table.appendChild(empty);
+      document.getElementById('sso-pagination').innerHTML = '';
+      return;
+    }
 
     var cols = [
       { key: 'login', label: 'Owner' },
@@ -481,10 +559,15 @@
       { key: 'authorized_credential_expires_at', label: 'Expires' },
     ];
 
-    table.appendChild(buildHeader(cols, ssoSort, function() { renderSSOCredentials(report.sso_credentials); }));
+    table.appendChild(buildHeader(cols, ssoSort, function() { ssoPage = 1; renderSSOCredentials(report.sso_credentials); }));
+
+    var page = sorted.slice((ssoPage - 1) * PAGE_SIZE, ssoPage * PAGE_SIZE);
+    buildPagination('sso-pagination', sorted.length, ssoPage, function(p) {
+      ssoPage = p; renderSSOCredentials(creds);
+    });
 
     var tbody = document.createElement('tbody');
-    sorted.forEach(function(c) {
+    page.forEach(function(c) {
       var tr = document.createElement('tr');
       addCell(tr, c.login);
       var typeCell = document.createElement('td');
@@ -792,9 +875,20 @@
     });
   }
 
+  // SSO type filter chips
+  document.querySelectorAll('#sso-type-filter .filter-chip').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#sso-type-filter .filter-chip').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      ssoTypeFilter = btn.dataset.type;
+      ssoPage = 1;
+      if (report) renderSSOCredentials(report.sso_credentials);
+    });
+  });
+
   setupFilter('pats-filter', renderPATs, 'pats');
-  setupFilter('apps-filter', renderApps, 'apps');
-  setupFilter('sso-filter', renderSSOCredentials, 'sso_credentials');
+  setupFilter('apps-filter', function(apps) { appPage = 1; renderApps(apps); }, 'apps');
+  setupFilter('sso-filter', function(creds) { ssoPage = 1; renderSSOCredentials(creds); }, 'sso_credentials');
   setupFilter('secrets-filter', renderSecrets, 'secrets');
   setupFilter('deploy-keys-filter', renderDeployKeys, 'deploy_keys');
   setupFilter('workflow-perms-filter', renderWorkflowPerms, 'workflow_permissions');
@@ -823,9 +917,9 @@
       report = data;
       renderSummary(data.summary);
       renderPATs(data.pats);
-      renderApps(data.apps);
+      appPage = 1; renderApps(data.apps);
       renderRequests(data.pending_requests);
-      renderSSOCredentials(data.sso_credentials);
+      ssoPage = 1; renderSSOCredentials(data.sso_credentials);
       renderSecrets(data.secrets);
       renderDeployKeys(data.deploy_keys);
       renderWorkflowPerms(data.workflow_permissions);

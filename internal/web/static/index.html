@@ -137,6 +137,7 @@
             </div>
           </div>
           <div class="table-wrap"><table id="apps-table"><tbody></tbody></table></div>
+          <div class="pagination" id="apps-pagination"></div>
         </div>
 
         <div class="tab-content" id="tab-requests">
@@ -149,9 +150,17 @@
         <div class="tab-content" id="tab-sso">
           <div class="section-header">
             <h2>SSO Authorized Credentials</h2>
-            <input type="text" class="filter-input" id="sso-filter" placeholder="Search credentials…">
+            <div class="section-actions">
+              <div class="filter-group" id="sso-type-filter">
+                <button class="filter-chip active" data-type="">All</button>
+                <button class="filter-chip" data-type="personal access token">PAT</button>
+                <button class="filter-chip" data-type="ssh key">SSH Key</button>
+              </div>
+              <input type="text" class="filter-input" id="sso-filter" placeholder="Search credentials…">
+            </div>
           </div>
           <div class="table-wrap"><table id="sso-table"><tbody></tbody></table></div>
+          <div class="pagination" id="sso-pagination"></div>
         </div>
 
         <div class="tab-content" id="tab-secrets">
