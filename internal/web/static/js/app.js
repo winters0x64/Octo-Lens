@@ -450,9 +450,16 @@
     var tbody = document.createElement('tbody');
     page.forEach(function(a) {
       var tr = document.createElement('tr');
+      tr.classList.add('expandable');
       if (isNewItem(a.id, 'app')) tr.classList.add('diff-new');
 
-      addCell(tr, a.app_name);
+      // Clickable app name that expands a permission detail row
+      var nameCell = document.createElement('td');
+      var nameLink = document.createElement('span');
+      nameLink.className = 'app-name-link';
+      nameLink.textContent = a.app_name;
+      nameCell.appendChild(nameLink);
+      tr.appendChild(nameCell);
 
       var repoCell = document.createElement('td');
       var repoBadge = document.createElement('span');
@@ -465,15 +472,31 @@
       if (a.high_risk_count > 0) {
         var hb = document.createElement('span');
         hb.className = 'badge high';
-        hb.textContent = a.high_risk_count;
+        hb.textContent = a.high_risk_count + ' high';
         highCell.appendChild(hb);
       } else {
         highCell.textContent = '0';
       }
       tr.appendChild(highCell);
 
-      addCell(tr, String(a.medium_risk_count));
-      addCell(tr, String(a.low_risk_count));
+      var medCell = document.createElement('td');
+      if (a.medium_risk_count > 0) {
+        var mb = document.createElement('span');
+        mb.className = 'badge medium';
+        mb.textContent = a.medium_risk_count + ' medium';
+        medCell.appendChild(mb);
+      } else { medCell.textContent = '0'; }
+      tr.appendChild(medCell);
+
+      var lowCell = document.createElement('td');
+      if (a.low_risk_count > 0) {
+        var lb = document.createElement('span');
+        lb.className = 'badge low';
+        lb.textContent = a.low_risk_count + ' low';
+        lowCell.appendChild(lb);
+      } else { lowCell.textContent = '0'; }
+      tr.appendChild(lowCell);
+
       addCell(tr, (a.events || []).join(', ') || '-');
       addCell(tr, new Date(a.created_at).toLocaleDateString());
 
@@ -484,6 +507,76 @@
       statusCell.appendChild(statusSpan);
       tr.appendChild(statusCell);
 
+      // Expand/collapse permission detail on click
+      var detailRow = null;
+      tr.addEventListener('click', function() {
+        if (detailRow) {
+          detailRow.remove();
+          detailRow = null;
+          return;
+        }
+        detailRow = document.createElement('tr');
+        detailRow.className = 'app-detail-row';
+        var dc = document.createElement('td');
+        dc.colSpan = 8;
+        dc.className = 'app-detail-cell';
+
+        var perms = a.permissions || [];
+        if (perms.length === 0) {
+          dc.textContent = 'No permissions listed.';
+        } else {
+          var groups = { high: [], medium: [], low: [] };
+          perms.forEach(function(p) { (groups[p.risk] || groups.low).push(p); });
+
+          var riskMeta = {
+            high:   { label: 'High Risk',   desc: 'Admin-level or destructive access — can modify org settings, delete resources, or control access.' },
+            medium: { label: 'Medium Risk',  desc: 'Write access to sensitive resources — can push code, manage secrets, or modify workflows.' },
+            low:    { label: 'Low Risk',     desc: 'Read-only access — can view but not modify resources.' },
+          };
+
+          ['high', 'medium', 'low'].forEach(function(risk) {
+            if (!groups[risk].length) return;
+            var section = document.createElement('div');
+            section.className = 'app-detail-section';
+
+            var header = document.createElement('div');
+            header.className = 'app-detail-risk-header app-detail-risk-' + risk;
+            var dot = document.createElement('span');
+            dot.className = 'app-detail-dot app-detail-dot-' + risk;
+            header.appendChild(dot);
+            var title = document.createElement('span');
+            title.textContent = riskMeta[risk].label + ' permissions';
+            header.appendChild(title);
+            var riskDesc = document.createElement('span');
+            riskDesc.className = 'app-detail-risk-desc';
+            riskDesc.textContent = riskMeta[risk].desc;
+            header.appendChild(riskDesc);
+            section.appendChild(header);
+
+            var permGrid = document.createElement('div');
+            permGrid.className = 'app-detail-perm-grid';
+            groups[risk].forEach(function(p) {
+              var item = document.createElement('div');
+              item.className = 'app-detail-perm-item';
+              var namePart = document.createElement('span');
+              namePart.className = 'app-detail-perm-name';
+              namePart.textContent = p.name.replace(/_/g, ' ');
+              var levelPart = document.createElement('span');
+              levelPart.className = 'badge ' + risk;
+              levelPart.textContent = p.level;
+              item.appendChild(namePart);
+              item.appendChild(levelPart);
+              permGrid.appendChild(item);
+            });
+            section.appendChild(permGrid);
+            dc.appendChild(section);
+          });
+        }
+
+        detailRow.appendChild(dc);
+        tr.parentNode.insertBefore(detailRow, tr.nextSibling);
+      });
+
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -493,12 +586,16 @@
 
   function renderRequests(requests) {
     var table = document.getElementById('requests-table');
-    if (!requests || requests.length === 0) { table.innerHTML = ''; return; }
+    if (!requests || requests.length === 0) {
+      table.innerHTML = '';
+      document.getElementById('count-requests').textContent = '0';
+      return;
+    }
     table.innerHTML = '';
 
     var thead = document.createElement('thead');
     var headerRow = document.createElement('tr');
-    ['Owner', 'Token Name', 'Repo Access', 'Permissions', 'Requested'].forEach(function(label) {
+    ['Owner', 'Token Name', 'Repo Access', 'Permissions', 'Expiry', 'Requested', 'Actions'].forEach(function(label) {
       var th = document.createElement('th'); th.textContent = label; headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
@@ -509,12 +606,83 @@
       var tr = document.createElement('tr');
       addCell(tr, r.owner_login);
       addCell(tr, r.token_name);
-      addCell(tr, r.repository_selection);
+
+      var repoCell = document.createElement('td');
+      var rb = document.createElement('span');
+      rb.className = 'badge ' + (r.repository_selection === 'all' ? 'high' : 'low');
+      rb.textContent = r.repository_selection;
+      repoCell.appendChild(rb);
+      tr.appendChild(repoCell);
+
       var permCell = document.createElement('td');
       permCell.className = 'cell-wrap';
       renderPermBadges(permCell, r.permissions);
       tr.appendChild(permCell);
+
+      addCell(tr, r.token_expires_at ? new Date(r.token_expires_at).toLocaleDateString() : 'Never');
       addCell(tr, new Date(r.created_at).toLocaleDateString());
+
+      // Approve / Deny action buttons
+      var actCell = document.createElement('td');
+      actCell.style.whiteSpace = 'nowrap';
+
+      var approveBtn = document.createElement('button');
+      approveBtn.className = 'action-btn approve';
+      approveBtn.textContent = 'Approve';
+      approveBtn.addEventListener('click', function() {
+        approveBtn.disabled = true;
+        denyBtn.disabled = true;
+        approveBtn.textContent = '…';
+        fetch('/api/pats/requests/' + r.id + '/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'approve', reason: '' }),
+        }).then(function(resp) {
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          tr.style.opacity = '0.4';
+          approveBtn.textContent = 'Approved';
+          fetchJSON('/api/pats/requests').then(function(data) {
+            renderRequests(data);
+          }).catch(function() {});
+        }).catch(function(err) {
+          approveBtn.textContent = 'Approve';
+          approveBtn.disabled = false;
+          denyBtn.disabled = false;
+          alert('Approve failed: ' + (err.message || 'unknown error'));
+        });
+      });
+
+      var denyBtn = document.createElement('button');
+      denyBtn.className = 'action-btn deny';
+      denyBtn.textContent = 'Deny';
+      denyBtn.style.marginLeft = '6px';
+      denyBtn.addEventListener('click', function() {
+        var reason = prompt('Reason for denying (optional):') || '';
+        approveBtn.disabled = true;
+        denyBtn.disabled = true;
+        denyBtn.textContent = '…';
+        fetch('/api/pats/requests/' + r.id + '/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'deny', reason: reason }),
+        }).then(function(resp) {
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          tr.style.opacity = '0.4';
+          denyBtn.textContent = 'Denied';
+          fetchJSON('/api/pats/requests').then(function(data) {
+            renderRequests(data);
+          }).catch(function() {});
+        }).catch(function(err) {
+          denyBtn.textContent = 'Deny';
+          approveBtn.disabled = false;
+          denyBtn.disabled = false;
+          alert('Deny failed: ' + (err.message || 'unknown error'));
+        });
+      });
+
+      actCell.appendChild(approveBtn);
+      actCell.appendChild(denyBtn);
+      tr.appendChild(actCell);
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);

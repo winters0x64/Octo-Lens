@@ -614,6 +614,84 @@ tr.diff-new td:first-child { border-left: 2px solid rgba(0,227,150,0.5); }
 
 .btn-export:hover { color: var(--accent); border-color: rgba(45,127,249,0.4); }
 
+/* ─── App name link ────────────────────────────────── */
+.app-name-link {
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.15s;
+}
+.app-name-link:hover { text-decoration-color: var(--accent); }
+
+/* ─── App permission detail row ─────────────────────── */
+.app-detail-row td { padding: 0 !important; border-bottom: 2px solid var(--accent) !important; }
+
+.app-detail-cell {
+  background: var(--bg) !important;
+  padding: 20px 24px !important;
+  animation: fadeIn 0.18s ease;
+}
+
+.app-detail-section { margin-bottom: 20px; }
+.app-detail-section:last-child { margin-bottom: 0; }
+
+.app-detail-risk-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.app-detail-risk-high   { color: var(--danger); }
+.app-detail-risk-medium { color: var(--warning); }
+.app-detail-risk-low    { color: var(--success); }
+
+.app-detail-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.app-detail-dot-high   { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
+.app-detail-dot-medium { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+.app-detail-dot-low    { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+.app-detail-risk-desc {
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.app-detail-perm-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-detail-perm-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.app-detail-perm-name {
+  color: var(--text);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
 /* ─── Pagination ───────────────────────────────────── */
 .pagination {
   display: flex;
