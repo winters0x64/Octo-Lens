@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 
 	gh "github.com/google/go-github/v68/github"
+	"gopkg.in/yaml.v3"
 
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/models"
 )
@@ -34,20 +37,38 @@ func fakeWorkflowPermissions() []models.WorkflowPermission {
 // fakeWorkflowFiles returns hardcoded fake workflow files for local UI development.
 func fakeWorkflowFiles() []models.WorkflowFile {
 	return []models.WorkflowFile{
-		// write-all + unpinned — critical
+		// write-all + unpinned + OIDC to prod — critical, large blast radius
 		{
 			RepoName: "scapia-backend", FileName: "deploy.yml",
 			Path: ".github/workflows/deploy.yml", Permissions: "write-all",
 			HasPinnedActions: false,
 			UnpinnedActions:  []string{"actions/checkout@v4", "actions/setup-node@v3", "aws-actions/amazon-ecr-login@v2"},
-			Risk: models.RiskHigh,
+			Actions: []models.ActionRef{
+				{Raw: "actions/checkout@v4", Owner: "actions", Name: "checkout", Ref: "v4", Kind: "marketplace"},
+				{Raw: "actions/setup-node@v3", Owner: "actions", Name: "setup-node", Ref: "v3", Kind: "marketplace"},
+				{Raw: "aws-actions/configure-aws-credentials@v4", Owner: "aws-actions", Name: "configure-aws-credentials", Ref: "v4", Kind: "marketplace"},
+				{Raw: "aws-actions/amazon-ecr-login@v2", Owner: "aws-actions", Name: "amazon-ecr-login", Ref: "v2", Kind: "marketplace"},
+			},
+			SecretRefs:   []string{"AWS_PROD_KEY", "SLACK_WEBHOOK"},
+			OIDCRoles:    []string{"arn:aws:iam::111122223333:role/ProdDeployRole"},
+			Environments: []string{"production"},
+			Triggers:     []string{"push", "workflow_dispatch"},
+			IDTokenWrite: true,
+			Risk:         models.RiskHigh,
 		},
+		// dangerous trigger + shared secret — pull_request_target with secret access
 		{
 			RepoName: "payments-service", FileName: "ci.yml",
 			Path: ".github/workflows/ci.yml", Permissions: "write-all",
 			HasPinnedActions: false,
 			UnpinnedActions:  []string{"actions/checkout@v4", "gradle/gradle-build-action@v2"},
-			Risk: models.RiskHigh,
+			Actions: []models.ActionRef{
+				{Raw: "actions/checkout@v4", Owner: "actions", Name: "checkout", Ref: "v4", Kind: "marketplace"},
+				{Raw: "gradle/gradle-build-action@v2", Owner: "gradle", Name: "gradle-build-action", Ref: "v2", Kind: "marketplace"},
+			},
+			SecretRefs: []string{"AWS_PROD_KEY", "NPM_TOKEN"},
+			Triggers:   []string{"pull_request_target", "push"},
+			Risk:       models.RiskHigh,
 		},
 		// write-all, all pinned
 		{
@@ -145,12 +166,23 @@ func (s *GitHubService) ListWorkflowPermissions(ctx context.Context, repos []*gh
 	return all, nil
 }
 
-// AuditWorkflowFiles scans .github/workflows/ in each repo for permission and pinning issues.
-func (s *GitHubService) AuditWorkflowFiles(ctx context.Context, repos []*gh.Repository) ([]models.WorkflowFile, error) {
+// WorkflowContent is the raw, decoded YAML of one workflow file, captured so it
+// can be handed to external analyzers (zizmor) without re-fetching.
+type WorkflowContent struct {
+	RepoName string
+	Path     string
+	Content  string
+}
+
+// AuditWorkflowFiles scans .github/workflows/ in each repo for permission and
+// pinning issues, and returns the raw decoded YAML of each file alongside the
+// findings so callers can run additional analysis (e.g. zizmor).
+func (s *GitHubService) AuditWorkflowFiles(ctx context.Context, repos []*gh.Repository) ([]models.WorkflowFile, []WorkflowContent, error) {
 	if os.Getenv("SEED_FAKE_SSO") == "true" {
-		return fakeWorkflowFiles(), nil
+		return fakeWorkflowFiles(), nil, nil
 	}
 	var all []models.WorkflowFile
+	var contents []WorkflowContent
 
 	for _, repo := range repos {
 		if repo.GetArchived() {
@@ -173,19 +205,24 @@ func (s *GitHubService) AuditWorkflowFiles(ctx context.Context, repos []*gh.Repo
 				continue
 			}
 
-			wf := s.auditSingleWorkflow(ctx, name, fname, file.GetPath())
+			wf, content := s.auditSingleWorkflow(ctx, name, fname, file.GetPath())
 			all = append(all, wf)
+			if content != "" {
+				contents = append(contents, WorkflowContent{RepoName: name, Path: file.GetPath(), Content: content})
+			}
 		}
 
 		if err := s.checkRateLimit(ctx); err != nil {
-			return all, err
+			return all, contents, err
 		}
 	}
 
-	return all, nil
+	return all, contents, nil
 }
 
-func (s *GitHubService) auditSingleWorkflow(ctx context.Context, repo, fileName, path string) models.WorkflowFile {
+// auditSingleWorkflow returns the parsed findings and the raw decoded YAML
+// (empty string when the content could not be fetched/decoded).
+func (s *GitHubService) auditSingleWorkflow(ctx context.Context, repo, fileName, path string) (models.WorkflowFile, string) {
 	wf := models.WorkflowFile{
 		RepoName: repo,
 		FileName: fileName,
@@ -197,18 +234,30 @@ func (s *GitHubService) auditSingleWorkflow(ctx context.Context, repo, fileName,
 	fileContent, _, _, err := s.client.Repositories.GetContents(ctx, s.org, repo, path, nil)
 	if err != nil || fileContent == nil {
 		wf.Permissions = "unknown"
-		return wf
+		return wf, ""
 	}
 
 	content, err := decodeContent(fileContent)
 	if err != nil {
 		wf.Permissions = "unknown"
-		return wf
+		return wf, ""
 	}
 
-	// Simple YAML analysis (no full parser to avoid dependencies)
+	// Top-level permission classification is kept as a string for back-compat
+	// with the existing UI/compliance checks regardless of structured parse.
 	wf.Permissions = analyzePermissions(content)
-	wf.UnpinnedActions = findUnpinnedActions(content)
+
+	// Structured parse for blast-radius inputs. Secret references are regex-based
+	// (they appear in expressions anywhere), the rest come from the YAML tree.
+	wf.SecretRefs = extractSecretRefs(content)
+	parseWorkflowStructure(content, &wf)
+
+	// Derive back-compat fields from the structured action list.
+	for _, a := range wf.Actions {
+		if !a.Pinned && (a.Kind == "marketplace" || a.Kind == "reusable_workflow") {
+			wf.UnpinnedActions = append(wf.UnpinnedActions, a.Raw)
+		}
+	}
 	wf.HasPinnedActions = len(wf.UnpinnedActions) == 0
 
 	// Determine risk
@@ -218,7 +267,269 @@ func (s *GitHubService) auditSingleWorkflow(ctx context.Context, repo, fileName,
 		wf.Risk = models.RiskMedium
 	}
 
-	return wf
+	return wf, content
+}
+
+// parseWorkflowStructure decodes the workflow YAML into a generic tree and
+// extracts actions, triggers, environments, OIDC roles, id-token usage, and
+// self-hosted runner usage. On parse failure it falls back to the legacy
+// line-based action scan so a malformed file never loses all signal.
+func parseWorkflowStructure(content string, wf *models.WorkflowFile) {
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(content), &doc); err != nil || doc == nil {
+		// Fallback: at least recover action refs from raw text.
+		for _, raw := range findUnpinnedActions(content) {
+			wf.Actions = append(wf.Actions, parseActionRef(raw))
+		}
+		return
+	}
+
+	wf.Triggers = extractTriggers(doc["on"])
+
+	// Top-level permissions can grant id-token.
+	if idTokenWrite(doc["permissions"]) {
+		wf.IDTokenWrite = true
+	}
+
+	envSet := map[string]bool{}
+	oidcSet := map[string]bool{}
+
+	jobs, _ := doc["jobs"].(map[string]any)
+	for _, jv := range jobs {
+		job, ok := jv.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		if idTokenWrite(job["permissions"]) {
+			wf.IDTokenWrite = true
+		}
+		if runsOnSelfHosted(job["runs-on"]) {
+			wf.SelfHosted = true
+		}
+		for _, e := range extractEnvironments(job["environment"]) {
+			envSet[e] = true
+		}
+
+		steps, _ := job["steps"].([]any)
+		for _, sv := range steps {
+			step, ok := sv.(map[string]any)
+			if !ok {
+				continue
+			}
+			uses, _ := step["uses"].(string)
+			if uses == "" {
+				continue
+			}
+			ref := parseActionRef(uses)
+			wf.Actions = append(wf.Actions, ref)
+
+			if with, ok := step["with"].(map[string]any); ok {
+				for _, role := range oidcRolesFromStep(ref, with) {
+					oidcSet[role] = true
+				}
+			}
+		}
+	}
+
+	wf.Environments = sortedKeys(envSet)
+	wf.OIDCRoles = sortedKeys(oidcSet)
+}
+
+var secretRefRe = regexp.MustCompile(`secrets\.([A-Za-z_][A-Za-z0-9_]*)`)
+
+// extractSecretRefs returns the distinct secret names referenced via
+// ${{ secrets.NAME }} expressions. Dynamic references (secrets.*, the whole
+// secrets context via toJSON) collapse to "*".
+func extractSecretRefs(content string) []string {
+	set := map[string]bool{}
+	if strings.Contains(content, "toJSON(secrets)") || strings.Contains(content, "secrets.*") {
+		set["*"] = true
+	}
+	for _, m := range secretRefRe.FindAllStringSubmatch(content, -1) {
+		name := m[1]
+		// GITHUB_TOKEN is always present; it isn't a managed secret.
+		if name == "GITHUB_TOKEN" {
+			continue
+		}
+		set[name] = true
+	}
+	return sortedKeys(set)
+}
+
+// parseActionRef parses a `uses:` value into its components and classifies it.
+func parseActionRef(raw string) models.ActionRef {
+	raw = strings.TrimSpace(raw)
+	ref := models.ActionRef{Raw: raw}
+
+	switch {
+	case strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../"):
+		ref.Kind = "local"
+		return ref
+	case strings.HasPrefix(raw, "docker://"):
+		ref.Kind = "docker"
+		ref.Name = strings.TrimPrefix(raw, "docker://")
+		return ref
+	}
+
+	// owner/repo[/path]@ref  — a reusable workflow is owner/repo/path.yml@ref.
+	path := raw
+	if at := strings.LastIndex(raw, "@"); at != -1 {
+		path = raw[:at]
+		ref.Ref = raw[at+1:]
+	}
+	if strings.Contains(path, ".github/workflows/") ||
+		strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".yaml") {
+		ref.Kind = "reusable_workflow"
+	} else {
+		ref.Kind = "marketplace"
+	}
+
+	parts := strings.SplitN(path, "/", 2)
+	ref.Owner = parts[0]
+	if len(parts) > 1 {
+		ref.Name = parts[1]
+	}
+
+	if len(ref.Ref) == 40 && isHex(ref.Ref) {
+		ref.SHA = ref.Ref
+		ref.Pinned = true
+	}
+	return ref
+}
+
+// oidcRolesFromStep pulls the cloud identity a credential-configuring action
+// requests, for the common AWS/Azure/GCP login actions.
+func oidcRolesFromStep(ref models.ActionRef, with map[string]any) []string {
+	id := ref.Owner + "/" + ref.Name
+	var keys []string
+	switch {
+	case strings.HasPrefix(id, "aws-actions/configure-aws-credentials"):
+		keys = []string{"role-to-assume"}
+	case strings.HasPrefix(id, "azure/login"):
+		keys = []string{"client-id"}
+	case strings.HasPrefix(id, "google-github-actions/auth"):
+		keys = []string{"workload_identity_provider"}
+	default:
+		return nil
+	}
+	var out []string
+	for _, k := range keys {
+		if v, ok := with[k].(string); ok {
+			v = strings.TrimSpace(v)
+			// Skip values that are pure expressions (e.g. ${{ secrets.ROLE }})
+			// with no literal ARN — they carry no resolvable boundary.
+			if v != "" && !strings.HasPrefix(v, "${{") {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// idTokenWrite reports whether a permissions value grants OIDC id-token: write.
+func idTokenWrite(perm any) bool {
+	switch p := perm.(type) {
+	case string:
+		return p == "write-all"
+	case map[string]any:
+		if v, ok := p["id-token"].(string); ok {
+			return v == "write"
+		}
+	}
+	return false
+}
+
+// runsOnSelfHosted reports whether a runs-on value targets a self-hosted runner.
+func runsOnSelfHosted(v any) bool {
+	isSelf := func(s string) bool {
+		s = strings.ToLower(s)
+		return s == "self-hosted" || strings.Contains(s, "self-hosted")
+	}
+	switch r := v.(type) {
+	case string:
+		return isSelf(r)
+	case []any:
+		for _, item := range r {
+			if s, ok := item.(string); ok && isSelf(s) {
+				return true
+			}
+		}
+	case map[string]any:
+		// runs-on: { group: ..., labels: [...] } form
+		if labels, ok := r["labels"].([]any); ok {
+			for _, item := range labels {
+				if s, ok := item.(string); ok && isSelf(s) {
+					return true
+				}
+			}
+		}
+		if _, ok := r["group"]; ok {
+			return true // runner groups are self-hosted by definition
+		}
+	}
+	return false
+}
+
+// extractEnvironments returns environment names from a job's environment: key,
+// which may be a bare string or a { name: ... } mapping.
+func extractEnvironments(v any) []string {
+	switch e := v.(type) {
+	case string:
+		if e != "" {
+			return []string{e}
+		}
+	case map[string]any:
+		if name, ok := e["name"].(string); ok && name != "" {
+			return []string{name}
+		}
+	case []any:
+		var out []string
+		for _, item := range e {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// extractTriggers returns the event names from a workflow's on: key, which may
+// be a string, a list, or a mapping of event -> config.
+func extractTriggers(v any) []string {
+	switch t := v.(type) {
+	case string:
+		return []string{t}
+	case []any:
+		var out []string
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case map[string]any:
+		out := make([]string, 0, len(t))
+		for k := range t {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	return nil
+}
+
+func sortedKeys(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func decodeContent(fc *gh.RepositoryContent) (string, error) {

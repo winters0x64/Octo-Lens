@@ -3,11 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PAT Monitor — Scapia</title>
+  <title>Octo Lens</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <script>
+    // Apply saved theme before first paint to avoid a flash.
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
 
@@ -19,8 +28,7 @@
       <div class="sidebar-brand">
         <svg width="28" height="28" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="7" fill="#2D7FF9" fill-opacity="0.2"/><path d="M16 7L8 11.5V20.5L16 25L24 20.5V11.5L16 7Z" stroke="#2D7FF9" stroke-width="1.5" stroke-linejoin="round"/><path d="M16 7V25" stroke="#2D7FF9" stroke-width="1.5" opacity="0.35"/><path d="M8 11.5L24 20.5" stroke="#2D7FF9" stroke-width="1.5" opacity="0.35"/><path d="M24 11.5L8 20.5" stroke="#2D7FF9" stroke-width="1.5" opacity="0.35"/></svg>
         <div class="brand-text">
-          <span class="brand-name">PAT Monitor</span>
-          <span class="brand-org" id="org-name">—</span>
+          <span class="brand-name">Octo Lens</span>
         </div>
       </div>
 
@@ -49,7 +57,7 @@
         </div>
 
         <div class="nav-group">
-          <div class="nav-group-label">Infrastructure</div>
+          <div class="nav-group-label">Secrets &amp; Keys</div>
           <button class="nav-item" data-tab="tab-secrets" data-title="Actions Secrets" style="display:none">
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.25"/><path d="M5 7V5a3 3 0 016 0v2" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
             Secrets <span class="nav-badge" id="count-secrets">0</span>
@@ -58,6 +66,10 @@
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M3 3h10v7a3 3 0 01-10 0V3z" stroke="currentColor" stroke-width="1.25"/><path d="M6 7h4M8 5v4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
             Deploy Keys <span class="nav-badge" id="count-deploy-keys">0</span>
           </button>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-label">Supply Chain</div>
           <button class="nav-item" data-tab="tab-workflow-perms" data-title="GITHUB_TOKEN Permissions" style="display:none">
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
             GITHUB_TOKEN <span class="nav-badge" id="count-workflow-perms">0</span>
@@ -66,27 +78,16 @@
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6L9 2z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>
             Workflow Audit <span class="nav-badge" id="count-workflow-files">0</span>
           </button>
-        </div>
-
-        <div class="nav-group">
-          <div class="nav-group-label">Threat Model</div>
+          <button class="nav-item" data-tab="tab-actions-inventory" data-title="GitHub Actions BOM" style="display:none">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M2 5l6-3 6 3-6 3-6-3z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M2 5v6l6 3 6-3V5M8 8v6" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>
+            Actions BOM <span class="nav-badge" id="count-actions-inventory">0</span>
+          </button>
           <button class="nav-item" data-tab="tab-attack-surface" data-title="Attack Surface Map">
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="4" cy="4" r="2" stroke="currentColor" stroke-width="1.25"/><circle cx="12" cy="4" r="2" stroke="currentColor" stroke-width="1.25"/><circle cx="8" cy="12" r="2" stroke="currentColor" stroke-width="1.25"/><path d="M5.5 5.5L7 10.5M10.5 5.5L9 10.5" stroke="currentColor" stroke-width="1.25"/></svg>
             Attack Surface
           </button>
         </div>
 
-        <div class="nav-group">
-          <div class="nav-group-label">Security</div>
-          <button class="nav-item" data-tab="tab-violations" data-title="Policy Violations" style="display:none">
-            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2L2 13h12L8 2z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
-            Violations <span class="nav-badge danger" id="count-violations">0</span>
-          </button>
-          <button class="nav-item" data-tab="tab-compliance" data-title="Security Compliance">
-            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2l1.5 3 3.5.5-2.5 2.5.5 3.5L8 10l-3 1.5.5-3.5L3 5.5l3.5-.5L8 2z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>
-            Compliance <span class="nav-badge" id="count-compliance"></span>
-          </button>
-        </div>
       </nav>
 
       <div class="sidebar-footer">
@@ -101,6 +102,10 @@
           <span id="scan-status" class="scan-status-badge" style="display:none">
             <span class="scan-dot"></span> Scanning…
           </span>
+          <button class="btn btn-icon" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+            <svg class="theme-icon-dark" width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5a4.5 4.5 0 0 0 7 7z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+            <svg class="theme-icon-light" width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M12.6 3.4l-1 1M4.4 11.6l-1 1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
           <button class="btn btn-primary" id="rescan-btn">Rescan</button>
           <button class="btn btn-logout" id="logout-btn" title="Sign out">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3H3a1 1 0 00-1 1v8a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -112,25 +117,28 @@
       <div class="content">
 
         <div class="tab-content active" id="tab-overview">
-          <div class="charts-row" id="overview-charts">
-            <div class="chart-card">
-              <div class="chart-title">PAT Status</div>
-              <canvas id="chart-pat-status"></canvas>
-            </div>
-            <div class="chart-card">
-              <div class="chart-title">Repository Access</div>
-              <canvas id="chart-repo-access"></canvas>
-            </div>
-            <div class="chart-card">
-              <div class="chart-title">Credential Landscape</div>
-              <canvas id="chart-credentials"></canvas>
-            </div>
-            <div class="chart-card">
-              <div class="chart-title">Security Posture</div>
-              <canvas id="chart-posture"></canvas>
+          <!-- Executive security posture hero -->
+          <div id="posture-hero" class="posture-hero"></div>
+
+          <!-- Headline risk KPIs (clickable, color-coded by severity) -->
+          <div id="overview-kpis" class="zizmor-summary overview-kpis"></div>
+
+          <!-- Top exposures: ranked attack paths to production -->
+          <div id="overview-exposures" class="overview-exposures"></div>
+
+          <!-- Fix First | Security controls -->
+          <div class="overview-cols">
+            <div class="overview-panel" id="overview-fixfirst"></div>
+            <div class="overview-panel">
+              <div class="overview-panel-head">
+                <h3>Security controls</h3>
+                <span id="compliance-score" class="compliance-score"></span>
+              </div>
+              <div id="compliance-posture" class="compliance-posture" style="display:none"></div>
+              <div id="compliance-failing" class="compliance-failing"></div>
             </div>
           </div>
-          <div class="cards" id="summary-cards"></div>
+
           <div id="diff-section" class="diff-section" style="display:none">
             <div class="diff-header">
               <span class="diff-title">Changes since last scan</span>
@@ -142,18 +150,21 @@
 
         <div class="tab-content" id="tab-pats">
           <div class="section-header">
-            <h2>Fine-Grained Personal Access Tokens</h2>
-            <div class="section-actions">
+            <h2 id="pats-section-title">Fine-Grained Personal Access Tokens</h2>
+            <div class="section-actions" id="pats-actions">
               <input type="text" class="filter-input" id="pats-filter" placeholder="Search PATs…">
               <button class="btn btn-export" onclick="exportCSV()">Export CSV</button>
             </div>
           </div>
-          <div class="table-wrap"><table id="pats-table"><tbody></tbody></table></div>
-
-          <div id="pending-section" style="display:none;margin-top:28px">
-            <div class="section-header" style="margin-bottom:12px">
-              <h2>Pending PAT Requests <span class="nav-badge warn" id="count-requests" style="margin-left:6px">0</span></h2>
-            </div>
+          <div class="stat-strip" id="pats-stats"></div>
+          <div class="filter-group pats-view-toggle" id="pats-view-toggle">
+            <button class="filter-chip active" data-view="pats">Fine-Grained PATs</button>
+            <button class="filter-chip" data-view="requests">Pending Requests <span class="nav-badge warn" id="count-requests" style="margin-left:6px">0</span></button>
+          </div>
+          <div id="pats-view">
+            <div class="table-wrap"><table id="pats-table"><tbody></tbody></table></div>
+          </div>
+          <div id="requests-view" style="display:none">
             <div class="table-wrap"><table id="requests-table"><tbody></tbody></table></div>
           </div>
         </div>
@@ -165,6 +176,7 @@
               <input type="text" class="filter-input" id="apps-filter" placeholder="Search apps…">
             </div>
           </div>
+          <div class="stat-strip" id="apps-stats"></div>
           <div class="table-wrap"><table id="apps-table"><tbody></tbody></table></div>
           <div class="pagination" id="apps-pagination"></div>
         </div>
@@ -173,12 +185,16 @@
           <div class="section-header">
             <h2>SSO Authorized Credentials</h2>
             <div class="section-actions">
-              <div class="filter-group" id="sso-type-filter">
-                <button class="filter-chip active" data-type="">All</button>
-                <button class="filter-chip" data-type="personal access token">PAT</button>
-                <button class="filter-chip" data-type="SSH key">SSH Key</button>
-              </div>
               <input type="text" class="filter-input" id="sso-filter" placeholder="Search credentials…">
+            </div>
+          </div>
+          <div class="stat-strip" id="sso-stats"></div>
+          <div class="chip-row">
+            <span class="chip-row-label">Type</span>
+            <div class="filter-group" id="sso-type-filter">
+              <button class="filter-chip active" data-type="">All</button>
+              <button class="filter-chip" data-type="personal access token">PAT</button>
+              <button class="filter-chip" data-type="SSH key">SSH Key</button>
             </div>
           </div>
           <div class="table-wrap"><table id="sso-table"><tbody></tbody></table></div>
@@ -188,9 +204,22 @@
         <div class="tab-content" id="tab-secrets">
           <div class="section-header">
             <h2>Actions Secrets</h2>
-            <input type="text" class="filter-input" id="secrets-filter" placeholder="Search secrets…">
+            <div class="section-actions">
+              <input type="text" class="filter-input" id="secrets-filter" placeholder="Search secrets…">
+            </div>
+          </div>
+          <div class="stat-strip" id="secrets-stats"></div>
+          <div class="chip-row">
+            <span class="chip-row-label">Scope</span>
+            <div class="filter-group" id="secrets-scope-filter">
+              <button class="filter-chip active" data-scope="">All</button>
+              <button class="filter-chip" data-scope="org">Org</button>
+              <button class="filter-chip" data-scope="repo">Repo</button>
+              <button class="filter-chip" data-scope="environment">Environment</button>
+            </div>
           </div>
           <div class="table-wrap"><table id="secrets-table"><tbody></tbody></table></div>
+          <div class="pagination" id="secrets-pagination"></div>
         </div>
 
         <div class="tab-content" id="tab-deploy-keys">
@@ -198,6 +227,7 @@
             <h2>Deploy Keys</h2>
             <input type="text" class="filter-input" id="deploy-keys-filter" placeholder="Search deploy keys…">
           </div>
+          <div class="stat-strip" id="deploy-keys-stats"></div>
           <div class="table-wrap"><table id="deploy-keys-table"><tbody></tbody></table></div>
         </div>
 
@@ -206,15 +236,41 @@
             <h2>GITHUB_TOKEN Default Permissions</h2>
             <input type="text" class="filter-input" id="workflow-perms-filter" placeholder="Search repos…">
           </div>
+          <div class="stat-strip" id="workflow-perms-stats"></div>
           <div class="table-wrap"><table id="workflow-perms-table"><tbody></tbody></table></div>
+          <div class="pagination" id="workflow-perms-pagination"></div>
         </div>
 
         <div class="tab-content" id="tab-workflow-files">
-          <div class="section-header">
-            <h2>Workflow Security Audit</h2>
-            <input type="text" class="filter-input" id="workflow-files-filter" placeholder="Search workflows…">
+          <div id="workflow-list-view">
+            <div class="section-header">
+              <h2>Workflow Security Audit</h2>
+              <input type="text" class="filter-input" id="workflow-files-filter" placeholder="Search workflows…">
+            </div>
+            <div class="zizmor-summary" id="workflow-zizmor-summary"></div>
+            <div class="table-wrap"><table id="workflow-files-table"><tbody></tbody></table></div>
+            <div class="pagination" id="workflow-files-pagination"></div>
           </div>
-          <div class="table-wrap"><table id="workflow-files-table"><tbody></tbody></table></div>
+          <div id="workflow-detail-view" style="display:none">
+            <button class="btn btn-sm wf-back-btn" id="workflow-detail-back">&larr; Back to findings</button>
+            <div id="workflow-detail-body"></div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-actions-inventory">
+          <div id="actions-inv-list-view">
+            <div class="section-header">
+              <h2>GitHub Actions BOM</h2>
+              <input type="text" class="filter-input" id="actions-inventory-filter" placeholder="Search actions…">
+            </div>
+            <div class="zizmor-summary" id="actions-inventory-summary"></div>
+            <div class="table-wrap"><table id="actions-inventory-table"><tbody></tbody></table></div>
+            <div class="pagination" id="actions-inventory-pagination"></div>
+          </div>
+          <div id="actions-inv-detail-view" style="display:none">
+            <button class="btn btn-sm wf-back-btn" id="actions-inv-detail-back">&larr; Back to actions</button>
+            <div id="actions-inv-detail-body"></div>
+          </div>
         </div>
 
         <div class="tab-content" id="tab-violations">
@@ -234,72 +290,77 @@
           <div id="violations-groups"></div>
         </div>
 
-        <div class="tab-content" id="tab-compliance">
-          <div class="section-header">
-            <h2>Security Compliance</h2>
-            <span id="compliance-score" class="compliance-score"></span>
-          </div>
-          <div id="compliance-posture" class="compliance-posture" style="display:none"></div>
-          <div id="compliance-cards" class="compliance-grid"></div>
-        </div>
-
         <div class="tab-content" id="tab-attack-surface">
           <div class="attack-surface-layout">
-            <div class="graph-toolbar">
-              <div class="graph-toolbar-left">
-                <button class="graph-mode-btn active" id="graph-mode-explore">Explore</button>
-                <button class="graph-mode-btn" id="graph-mode-blast">Blast Radius</button>
+            <div class="graph-sticky">
+              <div class="graph-detail-head">
+                <span class="gdh-title">Blast-radius graph</span>
+                <span class="gdh-hint">Search above, or click any finding below, to map it here</span>
               </div>
-              <div class="graph-toolbar-center">
-                <div class="graph-filters" id="graph-entity-filters">
-                  <button class="graph-filter-chip active" data-entity="all">All</button>
-                  <button class="graph-filter-chip" data-entity="pat">PATs</button>
-                  <button class="graph-filter-chip" data-entity="app">Apps</button>
-                  <button class="graph-filter-chip" data-entity="sso">SSO</button>
-                  <button class="graph-filter-chip" data-entity="deploy_key">Keys</button>
-                  <button class="graph-filter-chip" data-entity="repo">Repos</button>
-                  <button class="graph-filter-chip" data-entity="workflow">Workflows</button>
-                  <button class="graph-filter-chip" data-entity="secret">Secrets</button>
+              <div class="graph-toolbar">
+                <div class="graph-toolbar-left">
+                  <div class="graph-search">
+                    <input type="text" id="graph-search-input" class="graph-search-input" placeholder="Search a secret, action, workflow, or OIDC role…" autocomplete="off" spellcheck="false">
+                    <div class="graph-search-results" id="graph-search-results" style="display:none"></div>
+                  </div>
                 </div>
-                <div class="graph-filters" id="graph-risk-filters">
-                  <button class="graph-filter-chip active" data-risk="all">All Risk</button>
-                  <button class="graph-filter-chip high" data-risk="high">High</button>
-                  <button class="graph-filter-chip medium" data-risk="medium">Medium+</button>
+                <div class="graph-toolbar-center">
+                  <span class="graph-focus-crumb" id="graph-focus-crumb" style="display:none"></span>
+                </div>
+                <div class="graph-toolbar-right">
+                  <button class="btn btn-sm" id="graph-clear-btn" style="display:none">Clear</button>
+                  <button class="btn btn-sm" id="graph-fit-btn">Fit</button>
+                  <span class="graph-stats" id="graph-stats"></span>
                 </div>
               </div>
-              <div class="graph-toolbar-right">
-                <button class="btn btn-sm" id="graph-fit-btn">Fit</button>
-                <button class="btn btn-sm" id="graph-reset-btn">Reset</button>
-                <span class="graph-stats" id="graph-stats"></span>
+              <div class="graph-main">
+                <div id="cy-container" class="cy-container"></div>
+                <!-- Domain zones: drawn over the canvas (pointer-events:none) to separate
+                     what lives inside GitHub from the external cloud/AWS side. -->
+                <div class="graph-zone zone-github" id="zone-github" style="display:none"><span class="graph-zone-label">GitHub</span></div>
+                <div class="graph-zone zone-cloud" id="zone-cloud" style="display:none"><span class="graph-zone-label">Cloud · Production (AWS)</span></div>
+                <div id="graph-empty" class="graph-empty-state" style="display:none">
+                  <div class="ges-icon">🎯</div>
+                  <div class="ges-title">Pick a component to map its blast radius</div>
+                  <div class="ges-sub">Click a finding below, or search a secret, action, workflow, or OIDC role. The graph shows one investigation at a time — not the whole org.</div>
+                </div>
+                <div id="graph-info-panel" class="graph-info-panel" style="display:none">
+                  <div class="gip-header">
+                    <span class="gip-title" id="gip-title"></span>
+                    <button class="gip-close" id="gip-close">&times;</button>
+                  </div>
+                  <div class="gip-body" id="gip-body"></div>
+                </div>
+              </div>
+              <div class="graph-legend">
+                <span class="legend-title">Nodes:</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#8b5cf6"></span>Action</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#16a34a"></span>Workflow</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#0ea5e9"></span>Secret</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>OIDC role</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#b91c1c"></span>AWS account</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span>Repo</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#f97316"></span>PAT / App</span>
+                <span class="legend-sep">|</span>
+                <span class="legend-item"><span class="legend-line dashed" style="border-color:#dc2626;border-width:2px"></span>GitHub → AWS trust boundary</span>
+                <span class="legend-trust-note">boundary is declared from workflow config — not verified against the IAM trust policy</span>
               </div>
             </div>
-            <div class="graph-main">
-              <div id="cy-container" class="cy-container"></div>
-              <div id="graph-info-panel" class="graph-info-panel" style="display:none">
-                <div class="gip-header">
-                  <span class="gip-title" id="gip-title"></span>
-                  <button class="gip-close" id="gip-close">&times;</button>
-                </div>
-                <div class="gip-body" id="gip-body"></div>
-              </div>
-            </div>
-            <div class="graph-legend">
-              <span class="legend-title">Nodes:</span>
-              <span class="legend-item"><span class="legend-dot" style="background:#DC2626"></span>Secret</span>
-              <span class="legend-item"><span class="legend-dot" style="background:#2563EB"></span>Repo</span>
-              <span class="legend-item"><span class="legend-dot" style="background:#16A34A"></span>Workflow</span>
-              <span class="legend-item"><span class="legend-dot" style="background:#7C3AED"></span>Action</span>
-              <span class="legend-item"><span class="legend-dot" style="background:#F97316"></span>PAT / App</span>
-              <span class="legend-item"><span class="legend-dot" style="background:#EC4899"></span>SSO</span>
-              <span class="legend-sep">|</span>
-              <span class="legend-title">Edges:</span>
-              <span class="legend-item"><span class="legend-line" style="background:#f87171"></span>write</span>
-              <span class="legend-item"><span class="legend-line" style="background:#60a5fa"></span>read</span>
-              <span class="legend-item"><span class="legend-line" style="background:#fb923c"></span>secret</span>
-              <span class="legend-item"><span class="legend-line" style="background:#4ade80"></span>trigger</span>
-              <span class="legend-item"><span class="legend-line dashed" style="border-color:#c084fc"></span>hijack</span>
-            </div>
+            <div class="findings-wrap" id="graph-findings"></div>
           </div>
+        </div>
+
+        <div class="tab-content" id="tab-metric-drill">
+          <button class="btn btn-sm wf-back-btn" id="metric-drill-back">&larr; Back</button>
+          <div class="section-header"><h2 id="metric-drill-title"></h2></div>
+          <div class="table-wrap"><table id="metric-drill-table"></table></div>
+          <div class="pagination" id="metric-drill-pagination"></div>
+        </div>
+
+        <div class="tab-content" id="tab-item-detail">
+          <button class="btn btn-sm wf-back-btn" id="item-detail-back">&larr; Back</button>
+          <div class="section-header"><h2 id="item-detail-title"></h2></div>
+          <div id="item-detail-body"></div>
         </div>
 
       </div>
