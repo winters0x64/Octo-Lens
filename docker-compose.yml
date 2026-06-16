@@ -23,18 +23,18 @@ services:
       mysql:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8005:8005"
     env_file:
       - .env
     environment:
       DATABASE_URL: patmonitor:${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}@tcp(mysql:3306)/patmonitor?parseTime=true&loc=UTC&charset=utf8mb4
     volumes:
       - ./policy.yaml:/app/policy.yaml:ro
-      - ./private-key.pem:/app/private-key.pem:ro
+      - ./pat-test.pem:/app/private-key.pem:ro
     command:
       - serve
       - --addr=0.0.0.0
-      - --port=8080
+      - --port=8005
       - --scan-interval=30m
       - --policy=/app/policy.yaml
       - --auto-migrate=true

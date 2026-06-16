@@ -61,6 +61,30 @@ func mapInstallation(inst *gh.Installation) models.AppInstallation {
 	return app
 }
 
+// SuspendApp suspends a GitHub App installation. Requires app-level JWT.
+func (s *GitHubService) SuspendApp(ctx context.Context, installationID int64) error {
+	if s.appClient == nil {
+		return fmt.Errorf("app-level client not configured")
+	}
+	_, err := s.appClient.Apps.SuspendInstallation(ctx, installationID)
+	if err != nil {
+		return fmt.Errorf("suspending installation %d: %w", installationID, err)
+	}
+	return nil
+}
+
+// UnsuspendApp unsuspends a GitHub App installation. Requires app-level JWT.
+func (s *GitHubService) UnsuspendApp(ctx context.Context, installationID int64) error {
+	if s.appClient == nil {
+		return fmt.Errorf("app-level client not configured")
+	}
+	_, err := s.appClient.Apps.UnsuspendInstallation(ctx, installationID)
+	if err != nil {
+		return fmt.Errorf("unsuspending installation %d: %w", installationID, err)
+	}
+	return nil
+}
+
 func extractInstallationPermissions(perms *gh.InstallationPermissions) []models.Permission {
 	permMap := map[string]string{}
 

@@ -42,10 +42,6 @@
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="3" stroke="currentColor" stroke-width="1.25"/><path d="M6 6h4M6 9h2" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
             Apps <span class="nav-badge" id="count-apps">0</span>
           </button>
-          <button class="nav-item" data-tab="tab-requests" data-title="Pending Requests" style="display:none">
-            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.25"/><path d="M8 5v3.5L10 10" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
-            Pending <span class="nav-badge warn" id="count-requests">0</span>
-          </button>
           <button class="nav-item" data-tab="tab-sso" data-title="SSO Credentials" style="display:none">
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2a3 3 0 100 6 3 3 0 000-6z" stroke="currentColor" stroke-width="1.25"/><path d="M2 14c0-3.314 2.686-5 6-5s6 1.686 6 5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg>
             SSO Creds <span class="nav-badge" id="count-sso">0</span>
@@ -69,6 +65,14 @@
           <button class="nav-item" data-tab="tab-workflow-files" data-title="Workflow Security Audit" style="display:none">
             <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6L9 2z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>
             Workflow Audit <span class="nav-badge" id="count-workflow-files">0</span>
+          </button>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-label">Threat Model</div>
+          <button class="nav-item" data-tab="tab-attack-surface" data-title="Attack Surface Map">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="4" cy="4" r="2" stroke="currentColor" stroke-width="1.25"/><circle cx="12" cy="4" r="2" stroke="currentColor" stroke-width="1.25"/><circle cx="8" cy="12" r="2" stroke="currentColor" stroke-width="1.25"/><path d="M5.5 5.5L7 10.5M10.5 5.5L9 10.5" stroke="currentColor" stroke-width="1.25"/></svg>
+            Attack Surface
           </button>
         </div>
 
@@ -108,6 +112,24 @@
       <div class="content">
 
         <div class="tab-content active" id="tab-overview">
+          <div class="charts-row" id="overview-charts">
+            <div class="chart-card">
+              <div class="chart-title">PAT Status</div>
+              <canvas id="chart-pat-status"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Repository Access</div>
+              <canvas id="chart-repo-access"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Credential Landscape</div>
+              <canvas id="chart-credentials"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Security Posture</div>
+              <canvas id="chart-posture"></canvas>
+            </div>
+          </div>
           <div class="cards" id="summary-cards"></div>
           <div id="diff-section" class="diff-section" style="display:none">
             <div class="diff-header">
@@ -127,6 +149,13 @@
             </div>
           </div>
           <div class="table-wrap"><table id="pats-table"><tbody></tbody></table></div>
+
+          <div id="pending-section" style="display:none;margin-top:28px">
+            <div class="section-header" style="margin-bottom:12px">
+              <h2>Pending PAT Requests <span class="nav-badge warn" id="count-requests" style="margin-left:6px">0</span></h2>
+            </div>
+            <div class="table-wrap"><table id="requests-table"><tbody></tbody></table></div>
+          </div>
         </div>
 
         <div class="tab-content" id="tab-apps">
@@ -137,21 +166,23 @@
             </div>
           </div>
           <div class="table-wrap"><table id="apps-table"><tbody></tbody></table></div>
-        </div>
-
-        <div class="tab-content" id="tab-requests">
-          <div class="section-header">
-            <h2>Pending PAT Requests</h2>
-          </div>
-          <div class="table-wrap"><table id="requests-table"><tbody></tbody></table></div>
+          <div class="pagination" id="apps-pagination"></div>
         </div>
 
         <div class="tab-content" id="tab-sso">
           <div class="section-header">
             <h2>SSO Authorized Credentials</h2>
-            <input type="text" class="filter-input" id="sso-filter" placeholder="Search credentials…">
+            <div class="section-actions">
+              <div class="filter-group" id="sso-type-filter">
+                <button class="filter-chip active" data-type="">All</button>
+                <button class="filter-chip" data-type="personal access token">PAT</button>
+                <button class="filter-chip" data-type="SSH key">SSH Key</button>
+              </div>
+              <input type="text" class="filter-input" id="sso-filter" placeholder="Search credentials…">
+            </div>
           </div>
           <div class="table-wrap"><table id="sso-table"><tbody></tbody></table></div>
+          <div class="pagination" id="sso-pagination"></div>
         </div>
 
         <div class="tab-content" id="tab-secrets">
@@ -189,9 +220,18 @@
         <div class="tab-content" id="tab-violations">
           <div class="section-header">
             <h2>Policy Violations</h2>
-            <input type="text" class="filter-input" id="violations-filter" placeholder="Search violations…">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="filter-group" id="violations-sev-filter">
+                <button class="filter-chip active" data-sev="">All</button>
+                <button class="filter-chip" data-sev="high">High</button>
+                <button class="filter-chip" data-sev="medium">Medium</button>
+                <button class="filter-chip" data-sev="low">Low</button>
+              </div>
+              <input type="text" class="filter-input" id="violations-filter" placeholder="Search violations…" style="width:200px">
+            </div>
           </div>
-          <div class="table-wrap"><table id="violations-table"><tbody></tbody></table></div>
+          <div id="violations-summary" class="violations-summary" style="display:none"></div>
+          <div id="violations-groups"></div>
         </div>
 
         <div class="tab-content" id="tab-compliance">
@@ -199,13 +239,77 @@
             <h2>Security Compliance</h2>
             <span id="compliance-score" class="compliance-score"></span>
           </div>
+          <div id="compliance-posture" class="compliance-posture" style="display:none"></div>
           <div id="compliance-cards" class="compliance-grid"></div>
+        </div>
+
+        <div class="tab-content" id="tab-attack-surface">
+          <div class="attack-surface-layout">
+            <div class="graph-toolbar">
+              <div class="graph-toolbar-left">
+                <button class="graph-mode-btn active" id="graph-mode-explore">Explore</button>
+                <button class="graph-mode-btn" id="graph-mode-blast">Blast Radius</button>
+              </div>
+              <div class="graph-toolbar-center">
+                <div class="graph-filters" id="graph-entity-filters">
+                  <button class="graph-filter-chip active" data-entity="all">All</button>
+                  <button class="graph-filter-chip" data-entity="pat">PATs</button>
+                  <button class="graph-filter-chip" data-entity="app">Apps</button>
+                  <button class="graph-filter-chip" data-entity="sso">SSO</button>
+                  <button class="graph-filter-chip" data-entity="deploy_key">Keys</button>
+                  <button class="graph-filter-chip" data-entity="repo">Repos</button>
+                  <button class="graph-filter-chip" data-entity="workflow">Workflows</button>
+                  <button class="graph-filter-chip" data-entity="secret">Secrets</button>
+                </div>
+                <div class="graph-filters" id="graph-risk-filters">
+                  <button class="graph-filter-chip active" data-risk="all">All Risk</button>
+                  <button class="graph-filter-chip high" data-risk="high">High</button>
+                  <button class="graph-filter-chip medium" data-risk="medium">Medium+</button>
+                </div>
+              </div>
+              <div class="graph-toolbar-right">
+                <button class="btn btn-sm" id="graph-fit-btn">Fit</button>
+                <button class="btn btn-sm" id="graph-reset-btn">Reset</button>
+                <span class="graph-stats" id="graph-stats"></span>
+              </div>
+            </div>
+            <div class="graph-main">
+              <div id="cy-container" class="cy-container"></div>
+              <div id="graph-info-panel" class="graph-info-panel" style="display:none">
+                <div class="gip-header">
+                  <span class="gip-title" id="gip-title"></span>
+                  <button class="gip-close" id="gip-close">&times;</button>
+                </div>
+                <div class="gip-body" id="gip-body"></div>
+              </div>
+            </div>
+            <div class="graph-legend">
+              <span class="legend-title">Nodes:</span>
+              <span class="legend-item"><span class="legend-dot" style="background:#DC2626"></span>Secret</span>
+              <span class="legend-item"><span class="legend-dot" style="background:#2563EB"></span>Repo</span>
+              <span class="legend-item"><span class="legend-dot" style="background:#16A34A"></span>Workflow</span>
+              <span class="legend-item"><span class="legend-dot" style="background:#7C3AED"></span>Action</span>
+              <span class="legend-item"><span class="legend-dot" style="background:#F97316"></span>PAT / App</span>
+              <span class="legend-item"><span class="legend-dot" style="background:#EC4899"></span>SSO</span>
+              <span class="legend-sep">|</span>
+              <span class="legend-title">Edges:</span>
+              <span class="legend-item"><span class="legend-line" style="background:#f87171"></span>write</span>
+              <span class="legend-item"><span class="legend-line" style="background:#60a5fa"></span>read</span>
+              <span class="legend-item"><span class="legend-line" style="background:#fb923c"></span>secret</span>
+              <span class="legend-item"><span class="legend-line" style="background:#4ade80"></span>trigger</span>
+              <span class="legend-item"><span class="legend-line dashed" style="border-color:#c084fc"></span>hijack</span>
+            </div>
+          </div>
         </div>
 
       </div>
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

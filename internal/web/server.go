@@ -227,44 +227,47 @@ func (s *Server) runScan(ctx context.Context) {
 	s.mu.Unlock()
 
 	s.onScanComplete(report)
+	s.sendSlackAlerts(diff, prevAppsWasComplete, prevSecretsWasComplete, prevDKsWasComplete)
+}
 
-	if s.slack != nil && diff.HasPrev {
-		// Filter to only genuinely new items. If the previous scan was not complete
-		// for an entity type, we have no reliable baseline — suppress to avoid
-		// "all N apps are new" spam on first boot or after a restart.
-		newApps := diff.NewApps
-		if !prevAppsWasComplete {
-			newApps = nil
-		}
-		newSecrets := diff.NewSecrets
-		if !prevSecretsWasComplete {
-			newSecrets = nil
-		}
-		newDKs := diff.NewDeployKeys
-		if !prevDKsWasComplete {
-			newDKs = nil
-		}
+func (s *Server) sendSlackAlerts(diff ScanDiff, prevAppsComplete, prevSecretsComplete, prevDKsComplete bool) {
+	if s.slack == nil || !diff.HasPrev {
+		return
+	}
 
-		if len(diff.NewPATs) > 0 || len(newApps) > 0 {
-			if err := s.slack.SendNewCredentials(s.org, diff.NewPATs, newApps); err != nil {
-				log.Printf("WARNING: Slack new credentials alert failed: %v", err)
-			}
+	newApps := diff.NewApps
+	if !prevAppsComplete {
+		newApps = nil
+	}
+	newSecrets := diff.NewSecrets
+	if !prevSecretsComplete {
+		newSecrets = nil
+	}
+	newDKs := diff.NewDeployKeys
+	if !prevDKsComplete {
+		newDKs = nil
+	}
+
+	if len(diff.NewPATs) > 0 || len(newApps) > 0 {
+		log.Printf("Sending Slack alert for %d new PAT(s), %d new app(s)", len(diff.NewPATs), len(newApps))
+		if err := s.slack.SendNewCredentials(s.org, diff.NewPATs, newApps); err != nil {
+			log.Printf("WARNING: Slack new credentials alert failed: %v", err)
 		}
-		if len(newSecrets) > 0 || len(newDKs) > 0 {
-			if err := s.slack.SendNewInfraCredentials(s.org, newSecrets, newDKs); err != nil {
-				log.Printf("WARNING: Slack new infra credentials alert failed: %v", err)
-			}
+	}
+	if len(newSecrets) > 0 || len(newDKs) > 0 {
+		if err := s.slack.SendNewInfraCredentials(s.org, newSecrets, newDKs); err != nil {
+			log.Printf("WARNING: Slack new infra credentials alert failed: %v", err)
 		}
-		if len(diff.ChangedPATs) > 0 {
-			pats := make([]models.PATInfo, len(diff.ChangedPATs))
-			fields := make([][]string, len(diff.ChangedPATs))
-			for i, c := range diff.ChangedPATs {
-				pats[i] = c.PAT
-				fields[i] = c.Fields
-			}
-			if err := s.slack.SendPermissionChanges(s.org, pats, fields); err != nil {
-				log.Printf("WARNING: Slack permission changes alert failed: %v", err)
-			}
+	}
+	if len(diff.ChangedPATs) > 0 {
+		pats := make([]models.PATInfo, len(diff.ChangedPATs))
+		fields := make([][]string, len(diff.ChangedPATs))
+		for i, c := range diff.ChangedPATs {
+			pats[i] = c.PAT
+			fields[i] = c.Fields
+		}
+		if err := s.slack.SendPermissionChanges(s.org, pats, fields); err != nil {
+			log.Printf("WARNING: Slack permission changes alert failed: %v", err)
 		}
 	}
 }
@@ -415,16 +418,21 @@ func (s *Server) ListenAndServe(cfg Config) error {
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/pats/requests", s.handlePATRequests)
 	mux.HandleFunc("GET /api/sso-credentials", s.handleSSOCredentials)
+	mux.HandleFunc("DELETE /api/sso-credentials/{id}/revoke", s.handleRevokeSSO)
 	mux.HandleFunc("GET /api/apps", s.handleApps)
 	mux.HandleFunc("POST /api/scan", s.handleScan)
 	mux.HandleFunc("GET /api/report", s.handleReport)
 	mux.HandleFunc("GET /api/violations", s.handleViolations)
 	mux.HandleFunc("GET /api/secrets", s.handleSecrets)
+	mux.HandleFunc("DELETE /api/secrets", s.handleDeleteSecret)
 	mux.HandleFunc("GET /api/deploy-keys", s.handleDeployKeys)
+	mux.HandleFunc("DELETE /api/deploy-keys/{id}", s.handleDeleteDeployKey)
 	mux.HandleFunc("GET /api/workflow-permissions", s.handleWorkflowPerms)
 	mux.HandleFunc("GET /api/workflow-files", s.handleWorkflowFiles)
 	mux.HandleFunc("POST /api/pats/requests/{id}/review", s.handleReviewPATRequest)
 	mux.HandleFunc("POST /api/pats/{id}/revoke", s.handleRevokePAT)
+	mux.HandleFunc("POST /api/apps/{id}/suspend", s.handleSuspendApp)
+	mux.HandleFunc("POST /api/apps/{id}/unsuspend", s.handleUnsuspendApp)
 	mux.HandleFunc("GET /api/compliance", s.handleCompliance)
 	mux.HandleFunc("GET /api/audit-log", s.handleAuditLog)
 	mux.HandleFunc("GET /api/diff", s.handleDiff)

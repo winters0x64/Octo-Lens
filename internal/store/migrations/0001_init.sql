@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS pats (
     last_changed_at DATETIME(3) NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS pats_status_idx ON pats(status);
-CREATE INDEX IF NOT EXISTS pats_owner_idx  ON pats(owner_login(255));
+CREATE INDEX pats_status_idx ON pats(status);
+CREATE INDEX pats_owner_idx  ON pats(owner_login(255));
 
 CREATE TABLE IF NOT EXISTS pat_requests (
     request_id BIGINT PRIMARY KEY,
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS pat_requests (
     CONSTRAINT fk_pat_requests_resolved_pat FOREIGN KEY (resolved_pat_id) REFERENCES pats(pat_id)
 );
 
-CREATE INDEX IF NOT EXISTS pat_requests_status_idx ON pat_requests(status);
+CREATE INDEX pat_requests_status_idx ON pat_requests(status);
 
 CREATE TABLE IF NOT EXISTS sso_credentials (
     credential_id BIGINT PRIMARY KEY,
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS sso_credentials (
     last_changed_at DATETIME(3) NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS sso_credentials_status_idx ON sso_credentials(status);
+CREATE INDEX sso_credentials_status_idx ON sso_credentials(status);
 
 CREATE TABLE IF NOT EXISTS events (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -87,9 +87,9 @@ CREATE TABLE IF NOT EXISTS events (
     CONSTRAINT fk_events_scan_run FOREIGN KEY (scan_run_id) REFERENCES scan_runs(id)
 );
 
-CREATE INDEX IF NOT EXISTS events_entity_idx   ON events(entity_type(64), entity_id(64), occurred_at DESC);
-CREATE INDEX IF NOT EXISTS events_occurred_idx ON events(occurred_at DESC);
-CREATE INDEX IF NOT EXISTS events_scan_run_idx ON events(scan_run_id);
+CREATE INDEX events_entity_idx   ON events(entity_type(64), entity_id(64), occurred_at DESC);
+CREATE INDEX events_occurred_idx ON events(occurred_at DESC);
+CREATE INDEX events_scan_run_idx ON events(scan_run_id);
 
 -- +goose Down
 

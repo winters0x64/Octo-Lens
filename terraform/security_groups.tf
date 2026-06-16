@@ -21,9 +21,7 @@ resource "aws_security_group" "ecs_tasks" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "${local.service_name}-ecs-tasks"
-  }
+  tags = merge(local.common_tags, { Name = "${local.service_name}-ecs-tasks" })
 }
 
 # ── Allow ECS tasks into cspm-db on port 3306 ─────────────────────────────────

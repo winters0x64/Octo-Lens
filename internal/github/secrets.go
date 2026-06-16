@@ -168,6 +168,36 @@ func (s *GitHubService) ListAllSecrets(ctx context.Context, repos []*gh.Reposito
 	return allSecrets, nil
 }
 
+// DeleteSecret deletes an Actions secret by scope.
+// scope must be "org", "repo", or "environment".
+func (s *GitHubService) DeleteSecret(ctx context.Context, scope, name, repoName, envName string) error {
+	switch scope {
+	case "org":
+		_, err := s.client.Actions.DeleteOrgSecret(ctx, s.org, name)
+		if err != nil {
+			return fmt.Errorf("deleting org secret %q: %w", name, err)
+		}
+	case "repo":
+		_, err := s.client.Actions.DeleteRepoSecret(ctx, s.org, repoName, name)
+		if err != nil {
+			return fmt.Errorf("deleting repo secret %q in %s: %w", name, repoName, err)
+		}
+	case "environment":
+		// go-github requires repo ID for env secrets; use raw request with repo name instead.
+		url := fmt.Sprintf("repos/%s/%s/environments/%s/secrets/%s", s.org, repoName, envName, name)
+		req, err := s.client.NewRequest("DELETE", url, nil)
+		if err != nil {
+			return fmt.Errorf("creating env secret delete request: %w", err)
+		}
+		if _, err = s.client.Do(ctx, req, nil); err != nil {
+			return fmt.Errorf("deleting env secret %q in %s/%s: %w", name, repoName, envName, err)
+		}
+	default:
+		return fmt.Errorf("unknown secret scope %q", scope)
+	}
+	return nil
+}
+
 func (s *GitHubService) checkRateLimit(ctx context.Context) error {
 	limits, _, err := s.client.RateLimit.Get(ctx)
 	if err != nil {

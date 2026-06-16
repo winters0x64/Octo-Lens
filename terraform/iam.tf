@@ -14,6 +14,7 @@ data "aws_iam_policy_document" "ecs_assume_role" {
 resource "aws_iam_role" "task_execution" {
   name               = "${local.service_name}-task-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume_role.json
+  tags               = merge(local.common_tags, { Name = "${local.service_name}-task-execution" })
 }
 
 resource "aws_iam_role_policy_attachment" "task_execution_managed" {
@@ -52,6 +53,7 @@ resource "aws_iam_role_policy" "task_execution_secrets" {
 resource "aws_iam_role" "task" {
   name               = "${local.service_name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume_role.json
+  tags               = merge(local.common_tags, { Name = "${local.service_name}-task" })
 }
 
 data "aws_iam_policy_document" "task_cloudwatch" {

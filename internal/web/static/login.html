@@ -9,19 +9,19 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg:          #0A0E1A;
-      --bg-card:     #111827;
-      --bg-elevated: #162030;
-      --border:      #1E2D4A;
-      --border-light:#243558;
-      --text:        #F0F4FF;
-      --text-secondary: #8B9DC3;
-      --text-muted:  #4A5A80;
-      --accent:      #2D7FF9;
-      --accent-hover:#4D9BFF;
-      --accent-glow: rgba(45, 127, 249, 0.2);
-      --danger:      #FF4560;
-      --danger-bg:   rgba(255, 69, 96, 0.1);
+      --bg:          #f1f5f9;
+      --bg-card:     #ffffff;
+      --bg-elevated: #f8fafc;
+      --border:      #e2e8f0;
+      --border-light:#cbd5e1;
+      --text:        #0f172a;
+      --text-secondary: #475569;
+      --text-muted:  #64748b;
+      --accent:      #2563eb;
+      --accent-hover:#1d4ed8;
+      --accent-glow: rgba(37, 99, 235, 0.15);
+      --danger:      #dc2626;
+      --danger-bg:   rgba(220, 38, 38, 0.08);
       --radius:      6px;
     }
 
@@ -45,8 +45,8 @@
       position: fixed;
       inset: 0;
       background-image:
-        linear-gradient(rgba(45,127,249,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(45,127,249,0.03) 1px, transparent 1px);
+        linear-gradient(rgba(37,99,235,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(37,99,235,0.05) 1px, transparent 1px);
       background-size: 40px 40px;
       pointer-events: none;
     }
@@ -64,7 +64,7 @@
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 40px 36px;
-      box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(45,127,249,0.05);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.10), 0 0 0 1px rgba(37,99,235,0.07);
     }
 
     .login-logo {
@@ -122,7 +122,7 @@
       padding: 0 14px;
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      background: rgba(255,255,255,0.04);
+      background: #f8fafc;
       color: var(--text);
       font-size: 14px;
       font-family: inherit;
@@ -138,7 +138,7 @@
 
     input[readonly] {
       color: var(--text-muted);
-      background: rgba(255,255,255,0.02);
+      background: #f1f5f9;
       cursor: default;
     }
 
@@ -206,7 +206,7 @@
       display: inline-block;
       width: 14px;
       height: 14px;
-      border: 2px solid rgba(255,255,255,0.3);
+      border: 2px solid rgba(255,255,255,0.5);
       border-top-color: #fff;
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
