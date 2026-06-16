@@ -1,6 +1,6 @@
 output "service_url" {
   description = "URL to access the PAT Monitor dashboard"
-  value       = "http://${data.aws_lb.existing.dns_name}:${var.alb_listener_port}"
+  value       = "https://github-monitor.security.scapia.in"
 }
 
 output "ecr_repository_url" {
