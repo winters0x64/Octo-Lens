@@ -20,12 +20,6 @@ variable "alb_name" {
   default     = "Securi-Secur-Iom0UrbXs87b"
 }
 
-variable "alb_listener_port" {
-  description = "Port on the ALB to expose the service"
-  type        = number
-  default     = 8976
-}
-
 variable "github_org" {
   description = "GitHub organisation to monitor"
   type        = string
