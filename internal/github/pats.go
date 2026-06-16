@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	gh "github.com/google/go-github/v68/github"
@@ -93,19 +94,17 @@ func (s *GitHubService) ListPATRepositories(ctx context.Context, patID int64) ([
 			return nil, fmt.Errorf("creating PAT repos request: %w", err)
 		}
 
-		var result struct {
-			Repositories []struct {
-				Name     string `json:"name"`
-				FullName string `json:"full_name"`
-				Private  bool   `json:"private"`
-			} `json:"repositories"`
+		var repos []struct {
+			Name     string `json:"name"`
+			FullName string `json:"full_name"`
+			Private  bool   `json:"private"`
 		}
-		resp, err := s.client.Do(ctx, req, &result)
+		resp, err := s.client.Do(ctx, req, &repos)
 		if err != nil {
 			return nil, fmt.Errorf("listing PAT repositories: %w", err)
 		}
 
-		for _, r := range result.Repositories {
+		for _, r := range repos {
 			allRepos = append(allRepos, models.RepoInfo{
 				Name:     r.Name,
 				FullName: r.FullName,
@@ -122,8 +121,86 @@ func (s *GitHubService) ListPATRepositories(ctx context.Context, patID int64) ([
 	return allRepos, nil
 }
 
+// fakePATRequests returns hardcoded fake pending PAT requests for local UI development.
+// Activated by SEED_FAKE_SSO=true. Never used in production.
+func fakePATRequests() []models.PATRequest {
+	now := time.Now()
+	ptr := func(t time.Time) *time.Time { return &t }
+	p := func(name, level string) models.Permission {
+		risk := models.RiskLow
+		high := map[string]bool{"write": true, "admin": true}
+		if high[level] {
+			risk = models.RiskHigh
+		}
+		return models.Permission{Name: name, Level: level, Risk: risk}
+	}
+
+	return []models.PATRequest{
+		{
+			ID: 9001, TokenName: "ci-deploy-prod", OwnerLogin: "madhukar-scapia",
+			RepositorySelection: "selected",
+			Permissions: []models.Permission{
+				p("contents", "write"), p("deployments", "write"), p("actions", "read"),
+			},
+			CreatedAt:      now.AddDate(0, 0, -2),
+			TokenExpiresAt: ptr(now.AddDate(0, 3, 0)),
+		},
+		{
+			ID: 9002, TokenName: "infra-automation", OwnerLogin: "aravind24k",
+			RepositorySelection: "all",
+			Permissions: []models.Permission{
+				p("contents", "write"), p("administration", "write"),
+				p("secrets", "write"), p("workflows", "write"),
+			},
+			CreatedAt:      now.AddDate(0, 0, -1),
+			TokenExpiresAt: nil, // no expiry — suspicious
+		},
+		{
+			ID: 9003, TokenName: "analytics-read", OwnerLogin: "sumedh-scapia",
+			RepositorySelection: "selected",
+			Permissions: []models.Permission{
+				p("contents", "read"), p("metadata", "read"),
+			},
+			CreatedAt:      now.AddDate(0, 0, -3),
+			TokenExpiresAt: ptr(now.AddDate(0, 1, 0)),
+		},
+		{
+			ID: 9004, TokenName: "frontend-deploy", OwnerLogin: "laksh-scapia",
+			RepositorySelection: "selected",
+			Permissions: []models.Permission{
+				p("contents", "write"), p("deployments", "write"), p("pages", "write"),
+			},
+			CreatedAt:      now.AddDate(0, 0, -4),
+			TokenExpiresAt: ptr(now.AddDate(0, 2, 0)),
+		},
+		{
+			ID: 9005, TokenName: "org-wide-admin", OwnerLogin: "farhan-scapia",
+			RepositorySelection: "all",
+			Permissions: []models.Permission{
+				p("contents", "write"), p("administration", "write"),
+				p("members", "write"), p("organization_administration", "write"),
+				p("secrets", "write"), p("workflows", "write"),
+			},
+			CreatedAt:      now.AddDate(0, 0, 0), // just now — urgent
+			TokenExpiresAt: nil,
+		},
+		{
+			ID: 9006, TokenName: "data-pipeline-bot", OwnerLogin: "anuragx7-dev",
+			RepositorySelection: "selected",
+			Permissions: []models.Permission{
+				p("contents", "read"), p("issues", "write"), p("pull_requests", "write"),
+			},
+			CreatedAt:      now.AddDate(0, 0, -5),
+			TokenExpiresAt: ptr(now.AddDate(0, 6, 0)),
+		},
+	}
+}
+
 // ListPendingPATRequests returns pending PAT access requests for the organization.
 func (s *GitHubService) ListPendingPATRequests(ctx context.Context) ([]models.PATRequest, error) {
+	if os.Getenv("SEED_FAKE_SSO") == "true" {
+		return fakePATRequests(), nil
+	}
 	var allRequests []models.PATRequest
 
 	opts := gh.ListOptions{PerPage: 100}
@@ -164,6 +241,9 @@ func (s *GitHubService) ListPendingPATRequests(ctx context.Context) ([]models.PA
 // ReviewPATRequest approves or denies a pending fine-grained PAT request.
 // action must be "approve" or "deny". reason is optional.
 func (s *GitHubService) ReviewPATRequest(ctx context.Context, patID int64, action, reason string) error {
+	if os.Getenv("SEED_FAKE_SSO") == "true" {
+		return nil // no-op in local dev mode; fake IDs don't exist in GitHub
+	}
 	body := struct {
 		Action string `json:"action"`
 		Reason string `json:"reason,omitempty"`

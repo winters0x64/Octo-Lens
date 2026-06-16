@@ -106,9 +106,7 @@ resource "aws_ecs_task_definition" "app" {
     }
   ])
 
-  tags = {
-    Name = local.service_name
-  }
+  tags = merge(local.common_tags, { Name = local.service_name })
 }
 
 resource "aws_ecs_service" "app" {
@@ -145,7 +143,5 @@ resource "aws_ecs_service" "app" {
     ]
   }
 
-  tags = {
-    Name = local.service_name
-  }
+  tags = merge(local.common_tags, { Name = local.service_name })
 }

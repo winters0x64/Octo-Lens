@@ -1,11 +1,15 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	ghservice "github.com/th3-j0ik3r/github-pat-monitor/internal/github"
+	"github.com/th3-j0ik3r/github-pat-monitor/internal/persist"
 )
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +46,7 @@ func (s *Server) handlePATRepos(w http.ResponseWriter, r *http.Request) {
 
 	repos, err := s.gh.ListPATRepositories(r.Context(), patID)
 	if err != nil {
+		log.Printf("ERROR: failed to fetch repos for PAT %d: %v", patID, err)
 		http.Error(w, `{"error":"failed to fetch repositories"}`, http.StatusInternalServerError)
 		return
 	}
@@ -139,22 +144,50 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.scanner.Scan(r.Context())
-	if err != nil {
-		http.Error(w, `{"error":"scan failed"}`, http.StatusInternalServerError)
-		return
-	}
-	report := result.Report
-	report.Org = s.org
+	// Return 202 immediately — the scan runs in the background with its own
+	// context so the ALB idle timeout (60s) doesn't cancel a 3-4 minute scan.
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, map[string]string{"status": "scanning"})
 
-	s.mu.Lock()
-	s.prevReport = s.report
-	s.report = report
-	s.mu.Unlock()
+	go func() {
+		ctx := context.Background()
+		result, err := s.scanner.Scan(ctx)
+		if err != nil {
+			log.Printf("ERROR: background scan failed: %v", err)
+			return
+		}
+		report := result.Report
+		report.Org = s.org
 
-	s.onScanComplete(report)
+		s.mu.Lock()
+		prevAppsWasComplete := s.prevAppsComplete
+		prevSecretsWasComplete := s.prevSecretsComplete
+		prevDKsWasComplete := s.prevDKsComplete
+		s.prevReport = s.report
+		s.report = report
+		s.prevAppsComplete = result.AppsComplete
+		s.prevSecretsComplete = result.SecretsComplete
+		s.prevDKsComplete = result.DeployKeysComplete
+		s.mu.Unlock()
 
-	writeJSON(w, report)
+		if summary := result.PhaseErrorSummary(); summary != "" {
+			log.Printf("WARNING: scan had partial failures: %s", summary)
+		}
+
+		if s.store != nil {
+			if err := persist.Apply(ctx, s.store, result, s.policy, time.Now()); err != nil {
+				log.Printf("WARNING: persistence failed: %v", err)
+			}
+		}
+
+		diff := computeDiff(s.prevReport, report)
+		s.mu.Lock()
+		s.scanDiff = diff
+		s.mu.Unlock()
+
+		s.onScanComplete(report)
+		s.sendSlackAlerts(diff, prevAppsWasComplete, prevSecretsWasComplete, prevDKsWasComplete)
+	}()
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +246,100 @@ func (s *Server) handleRevokePAT(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]string{"status": "revoked", "pat_id": idStr})
+}
+
+func (s *Server) handleDeleteDeployKey(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	keyID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid key ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	repoName := r.URL.Query().Get("repo")
+	if repoName == "" {
+		http.Error(w, `{"error":"repo query parameter is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.gh.DeleteDeployKey(r.Context(), repoName, keyID); err != nil {
+		http.Error(w, `{"error":"failed to delete deploy key: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "deleted", "key_id": idStr})
+}
+
+func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Scope   string `json:"scope"`
+		Name    string `json:"name"`
+		RepoName string `json:"repo_name"`
+		EnvName  string `json:"env_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Scope == "" || body.Name == "" {
+		http.Error(w, `{"error":"scope and name are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.gh.DeleteSecret(r.Context(), body.Scope, body.Name, body.RepoName, body.EnvName); err != nil {
+		http.Error(w, `{"error":"failed to delete secret: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "deleted", "name": body.Name})
+}
+
+func (s *Server) handleRevokeSSO(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	credID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid credential ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.gh.RevokeSSO(r.Context(), credID); err != nil {
+		http.Error(w, `{"error":"failed to revoke SSO credential: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "revoked", "credential_id": idStr})
+}
+
+func (s *Server) handleSuspendApp(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	appID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid app ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.gh.SuspendApp(r.Context(), appID); err != nil {
+		http.Error(w, `{"error":"failed to suspend app: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "suspended", "app_id": idStr})
+}
+
+func (s *Server) handleUnsuspendApp(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	appID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, `{"error":"invalid app ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.gh.UnsuspendApp(r.Context(), appID); err != nil {
+		http.Error(w, `{"error":"failed to unsuspend app: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "unsuspended", "app_id": idStr})
 }
 
 func (s *Server) handleCompliance(w http.ResponseWriter, r *http.Request) {

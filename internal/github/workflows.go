@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/base64"
+	"os"
 	"strings"
 
 	gh "github.com/google/go-github/v68/github"
@@ -10,8 +11,105 @@ import (
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/models"
 )
 
+// fakeWorkflowPermissions returns hardcoded fake workflow permissions for local UI development.
+func fakeWorkflowPermissions() []models.WorkflowPermission {
+	return []models.WorkflowPermission{
+		// write + can approve PRs — worst case
+		{RepoName: "scapia-backend",       DefaultPermission: "write", CanApprovePRs: true,  Risk: models.RiskHigh},
+		{RepoName: "payments-service",     DefaultPermission: "write", CanApprovePRs: true,  Risk: models.RiskHigh},
+		// write, no PR approval
+		{RepoName: "infra-terraform",      DefaultPermission: "write", CanApprovePRs: false, Risk: models.RiskHigh},
+		{RepoName: "card-service",         DefaultPermission: "write", CanApprovePRs: false, Risk: models.RiskHigh},
+		{RepoName: "notification-service", DefaultPermission: "write", CanApprovePRs: false, Risk: models.RiskHigh},
+		// read + can approve PRs — medium
+		{RepoName: "scapia-frontend",      DefaultPermission: "read",  CanApprovePRs: true,  Risk: models.RiskMedium},
+		{RepoName: "analytics-service",    DefaultPermission: "read",  CanApprovePRs: true,  Risk: models.RiskMedium},
+		// read, no PR approval — clean
+		{RepoName: "docs-internal",        DefaultPermission: "read",  CanApprovePRs: false, Risk: models.RiskLow},
+		{RepoName: "mobile-app",           DefaultPermission: "read",  CanApprovePRs: false, Risk: models.RiskLow},
+		{RepoName: "data-platform",        DefaultPermission: "read",  CanApprovePRs: false, Risk: models.RiskLow},
+	}
+}
+
+// fakeWorkflowFiles returns hardcoded fake workflow files for local UI development.
+func fakeWorkflowFiles() []models.WorkflowFile {
+	return []models.WorkflowFile{
+		// write-all + unpinned — critical
+		{
+			RepoName: "scapia-backend", FileName: "deploy.yml",
+			Path: ".github/workflows/deploy.yml", Permissions: "write-all",
+			HasPinnedActions: false,
+			UnpinnedActions:  []string{"actions/checkout@v4", "actions/setup-node@v3", "aws-actions/amazon-ecr-login@v2"},
+			Risk: models.RiskHigh,
+		},
+		{
+			RepoName: "payments-service", FileName: "ci.yml",
+			Path: ".github/workflows/ci.yml", Permissions: "write-all",
+			HasPinnedActions: false,
+			UnpinnedActions:  []string{"actions/checkout@v4", "gradle/gradle-build-action@v2"},
+			Risk: models.RiskHigh,
+		},
+		// write-all, all pinned
+		{
+			RepoName: "infra-terraform", FileName: "plan.yml",
+			Path: ".github/workflows/plan.yml", Permissions: "write-all",
+			HasPinnedActions: true,
+			UnpinnedActions:  nil,
+			Risk: models.RiskHigh,
+		},
+		// not set + unpinned
+		{
+			RepoName: "card-service", FileName: "release.yml",
+			Path: ".github/workflows/release.yml", Permissions: "not set",
+			HasPinnedActions: false,
+			UnpinnedActions:  []string{"actions/checkout@v4", "docker/build-push-action@v5", "sigstore/cosign-installer@v3"},
+			Risk: models.RiskHigh,
+		},
+		{
+			RepoName: "notification-service", FileName: "test.yml",
+			Path: ".github/workflows/test.yml", Permissions: "not set",
+			HasPinnedActions: false,
+			UnpinnedActions:  []string{"actions/checkout@v4", "actions/setup-go@v4"},
+			Risk: models.RiskHigh,
+		},
+		// read-all + unpinned — medium
+		{
+			RepoName: "scapia-frontend", FileName: "lint.yml",
+			Path: ".github/workflows/lint.yml", Permissions: "read-all",
+			HasPinnedActions: false,
+			UnpinnedActions:  []string{"actions/checkout@v4", "actions/setup-node@v3"},
+			Risk: models.RiskMedium,
+		},
+		{
+			RepoName: "analytics-service", FileName: "build.yml",
+			Path: ".github/workflows/build.yml", Permissions: "read-all",
+			HasPinnedActions: false,
+			UnpinnedActions:  []string{"actions/checkout@v4"},
+			Risk: models.RiskMedium,
+		},
+		// fully secure — read-all, all pinned
+		{
+			RepoName: "docs-internal", FileName: "publish.yml",
+			Path: ".github/workflows/publish.yml", Permissions: "read-all",
+			HasPinnedActions: true,
+			UnpinnedActions:  nil,
+			Risk: models.RiskLow,
+		},
+		{
+			RepoName: "mobile-app", FileName: "test.yml",
+			Path: ".github/workflows/test.yml", Permissions: "read-all",
+			HasPinnedActions: true,
+			UnpinnedActions:  nil,
+			Risk: models.RiskLow,
+		},
+	}
+}
+
 // ListWorkflowPermissions fetches the default GITHUB_TOKEN permissions for each repo.
 func (s *GitHubService) ListWorkflowPermissions(ctx context.Context, repos []*gh.Repository) ([]models.WorkflowPermission, error) {
+	if os.Getenv("SEED_FAKE_SSO") == "true" {
+		return fakeWorkflowPermissions(), nil
+	}
 	var all []models.WorkflowPermission
 
 	for _, repo := range repos {
@@ -49,6 +147,9 @@ func (s *GitHubService) ListWorkflowPermissions(ctx context.Context, repos []*gh
 
 // AuditWorkflowFiles scans .github/workflows/ in each repo for permission and pinning issues.
 func (s *GitHubService) AuditWorkflowFiles(ctx context.Context, repos []*gh.Repository) ([]models.WorkflowFile, error) {
+	if os.Getenv("SEED_FAKE_SSO") == "true" {
+		return fakeWorkflowFiles(), nil
+	}
 	var all []models.WorkflowFile
 
 	for _, repo := range repos {

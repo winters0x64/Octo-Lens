@@ -41,8 +41,12 @@ func LoadPrivateKey(explicitPath string) ([]byte, error) {
 }
 
 func validateFilePermissions(path string) error {
-	// Skip permission check on Windows
 	if runtime.GOOS == "windows" {
+		return nil
+	}
+
+	// Skip in containers — Docker volume mounts on macOS don't preserve Unix perms
+	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return nil
 	}
 

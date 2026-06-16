@@ -102,5 +102,13 @@ func initClient(ctx context.Context) error {
 	}
 
 	ghService = ghservice.NewGitHubService(ghClient, flagOrg)
+
+	// Create app-level client for suspend/unsuspend operations
+	appClient, err := auth.NewAppLevelClient(flagAppID, key)
+	if err != nil {
+		return fmt.Errorf("creating app-level client: %w", err)
+	}
+	ghService.SetAppClient(appClient)
+
 	return nil
 }

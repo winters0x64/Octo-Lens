@@ -25,9 +25,7 @@ resource "aws_lb_target_group" "app" {
     enabled         = true
   }
 
-  tags = {
-    Name = local.service_name
-  }
+  tags = merge(local.common_tags, { Name = local.service_name })
 }
 
 resource "aws_lb_listener" "app" {
@@ -40,7 +38,5 @@ resource "aws_lb_listener" "app" {
     target_group_arn = aws_lb_target_group.app.arn
   }
 
-  tags = {
-    Name = local.service_name
-  }
+  tags = merge(local.common_tags, { Name = local.service_name })
 }

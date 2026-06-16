@@ -32,9 +32,10 @@ type slackMessage struct {
 }
 
 type slackBlock struct {
-	Type   string      `json:"type"`
-	Text   *slackText  `json:"text,omitempty"`
-	Fields []slackText `json:"fields,omitempty"`
+	Type     string      `json:"type"`
+	Text     *slackText  `json:"text,omitempty"`
+	Fields   []slackText `json:"fields,omitempty"`
+	Elements []slackText `json:"elements,omitempty"`
 }
 
 type slackText struct {
@@ -60,24 +61,26 @@ func (s *SlackNotifier) SendViolations(org string, violations []policy.Violation
 		}
 	}
 
-	header := slackBlock{
+	var blocks []slackBlock
+
+	blocks = append(blocks, slackBlock{
 		Type: "header",
-		Text: &slackText{
-			Type: "plain_text",
-			Text: fmt.Sprintf("PAT Monitor: %d violation(s) in %s", len(violations), org),
-		},
-	}
+		Text: &slackText{Type: "plain_text", Text: fmt.Sprintf(":rotating_light: %d policy violation(s) in %s", len(violations), org)},
+	})
 
-	summary := slackBlock{
+	blocks = append(blocks, slackBlock{
 		Type: "section",
-		Text: &slackText{
-			Type: "mrkdwn",
-			Text: fmt.Sprintf("*High:* %d | *Medium:* %d | *Low:* %d", highCount, medCount, lowCount),
+		Fields: []slackText{
+			{Type: "mrkdwn", Text: fmt.Sprintf(":red_circle: *High:* %d", highCount)},
+			{Type: "mrkdwn", Text: fmt.Sprintf(":large_yellow_circle: *Medium:* %d", medCount)},
+			{Type: "mrkdwn", Text: fmt.Sprintf(":white_circle: *Low:* %d", lowCount)},
+			{Type: "mrkdwn", Text: fmt.Sprintf(":clock1: *Scanned:* `%s`", time.Now().UTC().Format("15:04 UTC"))},
 		},
-	}
+	})
 
-	var details []string
-	limit := 15
+	blocks = append(blocks, slackBlock{Type: "divider"})
+
+	limit := 10
 	if len(violations) < limit {
 		limit = len(violations)
 	}
@@ -88,26 +91,28 @@ func (s *SlackNotifier) SendViolations(org string, violations []policy.Violation
 		} else if v.Severity == "low" {
 			icon = ":white_circle:"
 		}
-		details = append(details, fmt.Sprintf("%s *%s* — %s\n    %s", icon, v.Resource, v.Message, v.Rule))
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf("%s *%s*\n%s\n`%s`", icon, v.Resource, v.Message, v.Rule)},
+		})
 	}
 	if len(violations) > limit {
-		details = append(details, fmt.Sprintf("_...and %d more_", len(violations)-limit))
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf("_...and %d more violations_", len(violations)-limit)},
+		})
 	}
 
-	detailBlock := slackBlock{
-		Type: "section",
-		Text: &slackText{
-			Type: "mrkdwn",
-			Text: strings.Join(details, "\n"),
-		},
-	}
+	blocks = append(blocks, slackBlock{Type: "divider"})
+	blocks = append(blocks, slackBlock{
+		Type:     "context",
+		Elements: []slackText{{Type: "mrkdwn", Text: fmt.Sprintf(":shield: PAT Monitor — %s", org)}},
+	})
 
-	msg := slackMessage{
-		Text:   fmt.Sprintf("PAT Monitor: %d policy violation(s) in %s", len(violations), org),
-		Blocks: []slackBlock{header, summary, detailBlock},
-	}
-
-	return s.send(msg)
+	return s.send(slackMessage{
+		Text:   fmt.Sprintf(":rotating_light: %d policy violation(s) in %s", len(violations), org),
+		Blocks: blocks,
+	})
 }
 
 // SendScanSummary sends a brief summary of the latest scan.
@@ -125,40 +130,96 @@ func (s *SlackNotifier) SendNewCredentials(org string, newPATs []models.PATInfo,
 		return nil
 	}
 
-	var lines []string
+	var blocks []slackBlock
+
+	blocks = append(blocks, slackBlock{
+		Type: "header",
+		Text: &slackText{Type: "plain_text", Text: fmt.Sprintf(":rotating_light: New credentials detected in %s", org)},
+	})
+
+	blocks = append(blocks, slackBlock{
+		Type: "section",
+		Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf("*%d* new credential(s) found during scan at `%s`",
+			len(newPATs)+len(newApps), time.Now().UTC().Format("2006-01-02 15:04 UTC"))},
+	})
+
 	for _, p := range newPATs {
-		expiry := "no expiry :warning:"
+		expiry := ":warning: *No expiry set*"
 		if p.TokenExpiresAt != nil {
-			expiry = "expires " + p.TokenExpiresAt.Format("2006-01-02")
+			days := int(time.Until(*p.TokenExpiresAt).Hours() / 24)
+			expiry = fmt.Sprintf("Expires `%s` (%d days)", p.TokenExpiresAt.Format("2006-01-02"), days)
 		}
-		icon := ":large_green_circle:"
+
+		risk := ":large_green_circle: Low"
 		if p.RepositorySelection == "all" {
-			icon = ":red_circle:"
+			risk = ":red_circle: High — all-repo access"
 		}
-		lines = append(lines, fmt.Sprintf("%s New PAT *%s* by `%s` — %s repos, %s",
-			icon, p.TokenName, p.OwnerLogin, p.RepositorySelection, expiry))
-	}
-	for _, a := range newApps {
-		icon := ":large_green_circle:"
-		if a.HighRiskCount > 0 {
-			icon = ":red_circle:"
+		for _, perm := range p.Permissions {
+			if perm.Level == "admin" {
+				risk = ":red_circle: High — admin permissions"
+				break
+			}
 		}
-		lines = append(lines, fmt.Sprintf("%s New app *%s* installed — %d high-risk perms, %s repos",
-			icon, a.AppName, a.HighRiskCount, a.RepositorySelection))
+
+		var permNames []string
+		for _, perm := range p.Permissions {
+			permNames = append(permNames, fmt.Sprintf("`%s:%s`", perm.Name, perm.Level))
+		}
+		permStr := "none"
+		if len(permNames) > 0 {
+			permStr = strings.Join(permNames, " ")
+		}
+
+		blocks = append(blocks, slackBlock{Type: "divider"})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf(":key: *New Fine-Grained PAT*\n*Token:* `%s`\n*Owner:* `%s`\n*Repo access:* %s",
+				p.TokenName, p.OwnerLogin, p.RepositorySelection)},
+		})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Fields: []slackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Risk:*\n%s", risk)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Expiry:*\n%s", expiry)},
+			},
+		})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf("*Permissions:*\n%s", permStr)},
+		})
 	}
 
-	header := slackBlock{
-		Type: "header",
-		Text: &slackText{Type: "plain_text", Text: fmt.Sprintf(":new: New credentials in %s", org)},
+	for _, a := range newApps {
+		risk := ":large_green_circle: Low"
+		if a.HighRiskCount > 0 {
+			risk = fmt.Sprintf(":red_circle: High — %d high-risk permissions", a.HighRiskCount)
+		} else if a.MediumRiskCount > 0 {
+			risk = fmt.Sprintf(":large_yellow_circle: Medium — %d medium-risk permissions", a.MediumRiskCount)
+		}
+
+		blocks = append(blocks, slackBlock{Type: "divider"})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf(":gear: *New GitHub App Installed*\n*App:* `%s`\n*Repo access:* %s",
+				a.AppName, a.RepositorySelection)},
+		})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Fields: []slackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Risk:*\n%s", risk)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Permissions:*\n%d high, %d medium, %d low", a.HighRiskCount, a.MediumRiskCount, a.LowRiskCount)},
+			},
+		})
 	}
-	body := slackBlock{
-		Type: "section",
-		Text: &slackText{Type: "mrkdwn", Text: strings.Join(lines, "\n")},
-	}
+
+	blocks = append(blocks, slackBlock{
+		Type:     "context",
+		Elements: []slackText{{Type: "mrkdwn", Text: fmt.Sprintf(":shield: PAT Monitor — %s", org)}},
+	})
 
 	return s.send(slackMessage{
-		Text:   fmt.Sprintf("%d new credential(s) detected in %s", len(newPATs)+len(newApps), org),
-		Blocks: []slackBlock{header, body},
+		Text:   fmt.Sprintf(":rotating_light: %d new credential(s) detected in %s", len(newPATs)+len(newApps), org),
+		Blocks: blocks,
 	})
 }
 
@@ -168,7 +229,19 @@ func (s *SlackNotifier) SendNewInfraCredentials(org string, newSecrets []models.
 		return nil
 	}
 
-	var lines []string
+	var blocks []slackBlock
+
+	blocks = append(blocks, slackBlock{
+		Type: "header",
+		Text: &slackText{Type: "plain_text", Text: fmt.Sprintf(":key: New secrets/keys in %s", org)},
+	})
+
+	blocks = append(blocks, slackBlock{
+		Type: "section",
+		Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf("*%d* new secret(s) and *%d* new deploy key(s) found at `%s`",
+			len(newSecrets), len(newDKs), time.Now().UTC().Format("2006-01-02 15:04 UTC"))},
+	})
+
 	for _, sec := range newSecrets {
 		icon := ":large_green_circle:"
 		if sec.Risk == models.RiskHigh {
@@ -183,30 +256,46 @@ func (s *SlackNotifier) SendNewInfraCredentials(org string, newSecrets []models.
 		if sec.EnvName != "" {
 			scope += "/" + sec.EnvName
 		}
-		lines = append(lines, fmt.Sprintf("%s New secret *%s* — scope: %s", icon, sec.Name, scope))
+		blocks = append(blocks, slackBlock{Type: "divider"})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Fields: []slackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Secret:*\n`%s`", sec.Name)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Risk:*\n%s %s", icon, string(sec.Risk))},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Scope:*\n`%s`", scope)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Updated:*\n`%s`", sec.UpdatedAt.Format("2006-01-02"))},
+			},
+		})
 	}
+
 	for _, dk := range newDKs {
 		icon := ":large_green_circle:"
 		access := "read-only"
 		if !dk.ReadOnly {
 			icon = ":red_circle:"
-			access = "write"
+			access = "*write*"
 		}
-		lines = append(lines, fmt.Sprintf("%s New deploy key *%s* on `%s` — %s access", icon, dk.Title, dk.RepoName, access))
+		blocks = append(blocks, slackBlock{Type: "divider"})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Fields: []slackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Deploy Key:*\n`%s`", dk.Title)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Repo:*\n`%s`", dk.RepoName)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Access:*\n%s %s", icon, access)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Created:*\n`%s`", dk.CreatedAt.Format("2006-01-02"))},
+			},
+		})
 	}
 
-	header := slackBlock{
-		Type: "header",
-		Text: &slackText{Type: "plain_text", Text: fmt.Sprintf(":new: New secrets/keys in %s", org)},
-	}
-	body := slackBlock{
-		Type: "section",
-		Text: &slackText{Type: "mrkdwn", Text: strings.Join(lines, "\n")},
-	}
+	blocks = append(blocks, slackBlock{Type: "divider"})
+	blocks = append(blocks, slackBlock{
+		Type:     "context",
+		Elements: []slackText{{Type: "mrkdwn", Text: fmt.Sprintf(":shield: PAT Monitor — %s", org)}},
+	})
 
 	return s.send(slackMessage{
-		Text:   fmt.Sprintf("%d new secret(s)/key(s) detected in %s", len(newSecrets)+len(newDKs), org),
-		Blocks: []slackBlock{header, body},
+		Text:   fmt.Sprintf(":key: %d new secret(s)/key(s) detected in %s", len(newSecrets)+len(newDKs), org),
+		Blocks: blocks,
 	})
 }
 
@@ -216,28 +305,46 @@ func (s *SlackNotifier) SendPermissionChanges(org string, pats []models.PATInfo,
 		return nil
 	}
 
-	var lines []string
+	var blocks []slackBlock
+
+	blocks = append(blocks, slackBlock{
+		Type: "header",
+		Text: &slackText{Type: "plain_text", Text: fmt.Sprintf(":pencil2: Credential changes in %s", org)},
+	})
+
+	blocks = append(blocks, slackBlock{
+		Type: "section",
+		Text: &slackText{Type: "mrkdwn", Text: fmt.Sprintf("*%d* credential(s) modified at `%s`",
+			len(pats), time.Now().UTC().Format("2006-01-02 15:04 UTC"))},
+	})
+
 	for i, p := range pats {
 		fields := "unknown"
 		if i < len(changedFields) && len(changedFields[i]) > 0 {
 			fields = strings.Join(changedFields[i], ", ")
 		}
-		lines = append(lines, fmt.Sprintf(":pencil2: PAT *%s* by `%s` — changed: %s",
-			p.TokenName, p.OwnerLogin, fields))
+
+		blocks = append(blocks, slackBlock{Type: "divider"})
+		blocks = append(blocks, slackBlock{
+			Type: "section",
+			Fields: []slackText{
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Token:*\n`%s`", p.TokenName)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Owner:*\n`%s`", p.OwnerLogin)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Changed:*\n%s", fields)},
+				{Type: "mrkdwn", Text: fmt.Sprintf("*Repo access:*\n%s", p.RepositorySelection)},
+			},
+		})
 	}
 
-	header := slackBlock{
-		Type: "header",
-		Text: &slackText{Type: "plain_text", Text: fmt.Sprintf(":pencil2: Credential changes in %s", org)},
-	}
-	body := slackBlock{
-		Type: "section",
-		Text: &slackText{Type: "mrkdwn", Text: strings.Join(lines, "\n")},
-	}
+	blocks = append(blocks, slackBlock{Type: "divider"})
+	blocks = append(blocks, slackBlock{
+		Type:     "context",
+		Elements: []slackText{{Type: "mrkdwn", Text: fmt.Sprintf(":shield: PAT Monitor — %s", org)}},
+	})
 
 	return s.send(slackMessage{
-		Text:   fmt.Sprintf("%d credential change(s) in %s", len(pats), org),
-		Blocks: []slackBlock{header, body},
+		Text:   fmt.Sprintf(":pencil2: %d credential change(s) in %s", len(pats), org),
+		Blocks: blocks,
 	})
 }
 

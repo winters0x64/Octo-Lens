@@ -10,9 +10,7 @@ resource "aws_ecr_repository" "main" {
     encryption_type = "AES256"
   }
 
-  tags = {
-    Name = local.service_name
-  }
+  tags = merge(local.common_tags, { Name = local.service_name })
 }
 
 resource "aws_ecr_lifecycle_policy" "main" {

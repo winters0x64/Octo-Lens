@@ -1,0 +1,98 @@
+GitHub App Permissions — Patter (PAT Monitor)
+=============================================
+Configured at: https://github.com/settings/apps/<your-app-slug>
+Installed on org: winter-sts
+
+After changing any permission, GitHub sends an approval request to org admins.
+Go to: https://github.com/organizations/winter-sts/settings/installations → approve.
+
+
+REPOSITORY PERMISSIONS
+-----------------------
+Contents          : Read-only
+  - Read .github/workflows/ YAML files to detect unpinned actions and audit permissions
+  - APIs: Repositories.GetContents
+
+Environments      : Read-only
+  - List environments per repo to enumerate environment-level secrets
+  - APIs: Repositories.ListEnvironments
+
+Secrets           : Read & write
+  - READ  — List org-level, repo-level, and environment-level Actions secrets (names only, not values)
+            APIs: Actions.ListOrgSecrets, Actions.ListRepoSecrets, Actions.ListEnvSecrets
+  - WRITE — Delete an Actions secret (org, repo, or environment scope)
+            APIs: Actions.DeleteOrgSecret, Actions.DeleteRepoSecret,
+                  DELETE /repos/{org}/{repo}/environments/{env}/secrets/{name}
+
+  NOTE: Write access added to support the "Delete" button on the Secrets page.
+        Without it, listing works but deletion returns 403.
+
+Administration    : Read & write
+  - READ  — Read default GITHUB_TOKEN workflow permissions per repo (read vs write)
+            List deploy keys per repo
+            APIs: Repositories.GetDefaultWorkflowPermissions, Repositories.ListKeys
+  - WRITE — Delete a deploy key from a repository
+            APIs: Repositories.DeleteKey (DELETE /repos/{owner}/{repo}/keys/{key_id})
+
+  NOTE: Write access added to support the "Delete" button on the Deploy Keys page.
+
+
+ORGANIZATION PERMISSIONS
+-------------------------
+Members           : Read & write
+  - READ  — List SAML SSO authorized credentials (classic PATs + SSH keys)
+            APIs: GET /orgs/{org}/credential-authorizations
+  - WRITE — Revoke an SSO credential authorization (deauthorize a PAT or SSH key from the org)
+            APIs: DELETE /orgs/{org}/credential-authorizations/{credential_id}
+
+  NOTE: Write access was added to support the "Revoke" button on the SSO Credentials page.
+        Without it, listing works but revocation returns 403.
+
+Personal Access Tokens: Read & write
+  - READ  — List approved fine-grained PATs and pending PAT requests
+            APIs: GET /orgs/{org}/personal-access-tokens
+                  GET /orgs/{org}/personal-access-tokens/requests
+                  GET /orgs/{org}/personal-access-tokens/{id}/repositories
+  - WRITE — Approve / deny pending fine-grained PAT requests
+            Revoke an approved fine-grained PAT
+            APIs: POST /orgs/{org}/personal-access-tokens/requests/{id}
+                  POST /orgs/{org}/personal-access-tokens/{id}  (action: revoke)
+
+Organization Administration: Read-only
+  - List all GitHub Apps installed in the org with their permissions and repo scope
+  - APIs: Organizations.ListInstallations
+
+Audit Log         : Read-only
+  - Fetch PAT-related audit events (created, revoked, access events)
+  - APIs: GET /orgs/{org}/audit-log
+
+
+APP-LEVEL PERMISSIONS (JWT, not installation token)
+-----------------------------------------------------
+These use the GitHub App's own JWT (not the installation token) and require
+no additional permission grants — they are part of the Apps API:
+
+  - Suspend a GitHub App installation
+    APIs: Apps.SuspendInstallation (PUT /app/installations/{id}/suspended)
+  - Unsuspend a GitHub App installation
+    APIs: Apps.UnsuspendInstallation (DELETE /app/installations/{id}/suspended)
+
+
+WHAT DOES NOT REQUIRE A PERMISSION GRANT
+------------------------------------------
+  - Listing org repositories (covered by Contents: read or implicit org access)
+    APIs: Repositories.ListByOrg
+
+
+SUMMARY TABLE
+-------------
+Permission                    | Level          | Used for
+------------------------------|----------------|--------------------------------------------
+Contents                      | Read           | Workflow YAML, deploy keys
+Environments                  | Read           | Environment secrets enumeration
+Secrets                       | Read & write   | Actions secrets list + delete
+Administration                | Read & write   | Workflow token permissions, deploy keys + delete
+Members                       | Read & write   | SSO credential list + revoke
+Personal Access Tokens        | Read & write   | Fine-grained PAT list, approve/deny, revoke
+Organization Administration   | Read           | Installed apps list
+Audit Log                     | Read           | PAT audit events
