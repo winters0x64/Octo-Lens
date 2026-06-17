@@ -309,16 +309,22 @@
                 </div>
                 <div class="graph-toolbar-right">
                   <button class="btn btn-sm" id="graph-clear-btn" style="display:none">Clear</button>
+                  <button class="btn btn-sm" id="graph-entry-btn" title="Highlight attacker entry points by class">⚑ Entry points</button>
                   <button class="btn btn-sm" id="graph-fit-btn">Fit</button>
                   <span class="graph-stats" id="graph-stats"></span>
                 </div>
               </div>
               <div class="graph-main">
                 <div id="cy-container" class="cy-container"></div>
-                <!-- Domain zones: drawn over the canvas (pointer-events:none) to separate
-                     what lives inside GitHub from the external cloud/AWS side. -->
-                <div class="graph-zone zone-github" id="zone-github" style="display:none"><span class="graph-zone-label">GitHub</span></div>
-                <div class="graph-zone zone-cloud" id="zone-cloud" style="display:none"><span class="graph-zone-label">Cloud · Production (AWS)</span></div>
+                <!-- Domain zones (GitHub vs Cloud/Production) are drawn as real
+                     Cytoscape compound parent nodes inside the canvas, so nodes
+                     are truly contained rather than overlaid by coordinates. -->
+                <div id="graph-entry-legend" class="graph-entry-legend" style="display:none">
+                  <span class="gel-title">Entry points</span>
+                  <span class="gel-item"><i class="gel-dot gel-supplychain"></i>Supply-chain (unpinned/3rd-party action)</span>
+                  <span class="gel-item"><i class="gel-dot gel-identity"></i>Identity (app / PAT / key)</span>
+                  <span class="gel-item"><i class="gel-dot gel-trigger"></i>Trigger (externally-runnable workflow)</span>
+                </div>
                 <div id="graph-empty" class="graph-empty-state" style="display:none">
                   <div class="ges-icon">🎯</div>
                   <div class="ges-title">Pick a component to map its blast radius</div>

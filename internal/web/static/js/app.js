@@ -3959,6 +3959,17 @@
         'shadow-blur': 11, 'shadow-color': '#0f172a', 'shadow-opacity': 0.16, 'shadow-offset-x': 0, 'shadow-offset-y': 2,
       }},
 
+      // ── Real GitHub avatar (apps / PAT owners / org): fill the circle with
+      //    the actual logo instead of the octicon glyph. The data-URI glyphs are
+      //    still used for nodes without an avatar. ──
+      { selector: 'node[avatar]', style: {
+        'background-image': 'data(avatar)',
+        'background-fit': 'cover', 'background-clip': 'node',
+        'background-width': '100%', 'background-height': '100%',
+        'background-position-x': '50%', 'background-position-y': '50%',
+        'background-color': '#ffffff',
+      }},
+
       // ── Type identity = solid fill color (white glyph reads on every fill) ──
       { selector: 'node[type="pat"]',         style: { 'background-color': '#f97316' }},
       { selector: 'node[type="app"]',         style: { 'background-color': '#f97316' }},
@@ -3988,6 +3999,52 @@
       // High-risk nodes get a red halo (keeps their solid fill).
       { selector: 'node[risk="high"]', style: {
         'shadow-blur': 22, 'shadow-color': '#ef4444', 'shadow-opacity': 0.45, 'shadow-offset-y': 0,
+      }},
+
+      // Long-lived high-criticality secret = crown jewel (SaaS/infra boundary):
+      // enlarged with a strong red halo, like the OIDC/AWS targets.
+      { selector: 'node[boundary]', style: {
+        'width': 56, 'height': 56,
+        'background-width': '22px', 'background-height': '22px',
+        'shadow-blur': 24, 'shadow-color': '#dc2626', 'shadow-opacity': 0.5, 'shadow-offset-y': 0,
+        'font-weight': '800',
+      }},
+
+      // Collapse/expand toggle chip: a neutral dashed pill with a chevron — styled
+      // to read as a CONTROL, not an entity, so it's clearly distinct from the
+      // colored app/action nodes around it. Down chevron = expand, up = collapse.
+      { selector: 'node[expander]', style: {
+        'shape': 'round-rectangle',
+        'background-color': '#64748b', 'background-opacity': 1,
+        'background-image': 'data(icon)', 'background-width': '13px', 'background-height': '13px',
+        'border-style': 'dashed', 'border-width': 2, 'border-color': '#94a3b8',
+        'color': '#475569', 'font-weight': '700', 'font-size': '10px',
+        'width': 56, 'height': 34,
+        'shadow-blur': 0, 'shadow-opacity': 0,
+      }},
+      // Expanded ("Show less") chip gets a lighter fill to reinforce the flip.
+      { selector: 'node[expander][expanded=1]', style: {
+        'background-color': '#94a3b8',
+      }},
+
+      // ── Domain zones as real compound parents (true containment) ──
+      // Nodes are children of their zone, so a node can never visually drift
+      // into the wrong region the way the old bounding-box overlays allowed.
+      { selector: 'node[zone]', style: {
+        'shape': 'round-rectangle',
+        'background-image': 'none',
+        'background-color': '#475569', 'background-opacity': 0.06,
+        'border-width': 1.5, 'border-color': 'rgba(71,85,105,0.40)', 'border-opacity': 1,
+        'border-style': 'dashed',
+        'label': 'data(label)', 'text-valign': 'top', 'text-halign': 'left',
+        'text-margin-y': 6, 'text-margin-x': 10,
+        'font-size': '11px', 'font-weight': '800', 'color': '#475569',
+        'text-transform': 'uppercase', 'padding': '30px',
+        'events': 'no',
+        'shadow-blur': 0, 'shadow-opacity': 0,
+      }},
+      { selector: 'node[zone="cloud"]', style: {
+        'background-color': '#dc2626', 'border-color': 'rgba(220,38,38,0.45)', 'color': '#b91c1c',
       }},
 
       // ── Edges: thin, clean, gradient-toned with subtle relationship labels ──
@@ -4026,6 +4083,14 @@
         'font-weight': '800',
       }},
       { selector: '.filtered-out', style: { 'display': 'none' }},
+
+      // ── Entry-points spotlight: ring colored by attacker-entry class (amber=
+      //    supply-chain, indigo=identity, slate=trigger); non-entries dimmed.
+      //    Severity halo (shadow) is left intact, so it stacks with the ring. ──
+      { selector: 'node.em-supplychain', style: { 'border-color': '#f59e0b', 'border-width': 6, 'border-opacity': 1 }},
+      { selector: 'node.em-identity',    style: { 'border-color': '#6366f1', 'border-width': 6, 'border-opacity': 1 }},
+      { selector: 'node.em-trigger',     style: { 'border-color': '#64748b', 'border-width': 6, 'border-opacity': 1 }},
+      { selector: '.entry-dim', style: { 'opacity': 0.18 }},
     ];
   }
 
@@ -4063,6 +4128,18 @@
     return 'data:image/svg+xml,' + encodeURIComponent(svg);
   }
 
+  // Chevron glyphs for the collapse/expand toggle chip — a control affordance
+  // (down = "expand to show more", up = "collapse"), distinct from entity glyphs.
+  var CHIP_SVG = {
+    down: '<path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/>',
+    up:   '<path d="M3.22 10.78a.749.749 0 0 1 0-1.06l4.25-4.25a.749.749 0 0 1 1.06 0l4.25 4.25a.749.749 0 1 1-1.06 1.06L8 6.811 4.28 10.53a.749.749 0 0 1-1.06 0Z"/>'
+  };
+  function chipIconDataUri(expanded) {
+    var inner = expanded ? CHIP_SVG.up : CHIP_SVG.down;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="#ffffff">' + inner + '</svg>';
+    return 'data:image/svg+xml,' + encodeURIComponent(svg);
+  }
+
   // nodeLabel2 builds the two-line node caption: bold name + muted type subtitle
   // (Wiz Explorer style). Crown jewels (prod boundary/target) get a 👑 prefix.
   function nodeLabel2(type, label) {
@@ -4087,7 +4164,10 @@
       var type = n.type === 'all_repos' ? 'allrepos' : n.type;
       var entity = n.meta || {};
       if (type === 'allrepos') entity = { total: (n.meta && n.meta.total) || 0 };
-      return { data: { id: n.id, type: type, label: n.label, name: n.label, label2: nodeLabel2(type, n.label), icon: iconDataUri(type), entity: entity, risk: n.risk || 'none' } };
+      var data = { id: n.id, type: type, label: n.label, name: n.label, label2: nodeLabel2(type, n.label), icon: iconDataUri(type), entity: entity, risk: n.risk || 'none' };
+      var avatarUrl = n.meta && n.meta.avatar;
+      if (avatarUrl) data.avatar = avatarUrl;
+      return { data: data };
     });
     var edges = (g.edges || []).map(function(e) {
       return { data: { id: e.id, source: e.source, target: e.target,
@@ -4120,16 +4200,54 @@
     }).catch(function() { host.innerHTML = '<div class="findings-loading">Failed to load findings.</div>'; });
   }
 
+  var FINDINGS_PAGE_SIZE = 10;
+
   function findingsSection(title, items, rowFn, emptyMsg) {
     var sec = document.createElement('div');
     sec.className = 'findings-section';
-    sec.innerHTML = '<div class="findings-title">' + title +
-      ' <span class="findings-count">' + items.length + '</span>' + sevCounts(items) + '</div>';
-    if (!items.length) { sec.innerHTML += '<div class="findings-empty">' + emptyMsg + '</div>'; return sec; }
+    var head = document.createElement('div');
+    head.className = 'findings-title';
+    // Count + severity breakdown reflect the FULL list, not the current page.
+    head.innerHTML = title + ' <span class="findings-count">' + items.length + '</span>' + sevCounts(items);
+    sec.appendChild(head);
+    if (!items.length) {
+      var empty = document.createElement('div');
+      empty.className = 'findings-empty';
+      empty.textContent = emptyMsg;
+      sec.appendChild(empty);
+      return sec;
+    }
     var list = document.createElement('div');
     list.className = 'findings-list';
-    items.forEach(function(it) { list.insertAdjacentHTML('beforeend', rowFn(it)); });
     sec.appendChild(list);
+    var pager = document.createElement('div');
+    pager.className = 'findings-pager';
+    sec.appendChild(pager);
+
+    var page = 0;
+    var pageCount = Math.ceil(items.length / FINDINGS_PAGE_SIZE);
+
+    function renderPage() {
+      var start = page * FINDINGS_PAGE_SIZE;
+      var end = Math.min(start + FINDINGS_PAGE_SIZE, items.length);
+      var html = '';
+      for (var i = start; i < end; i++) html += rowFn(items[i]);
+      list.innerHTML = html;
+      if (pageCount <= 1) { pager.style.display = 'none'; return; }
+      pager.style.display = 'flex';
+      pager.innerHTML =
+        '<button class="findings-page-btn" data-dir="-1"' + (page === 0 ? ' disabled' : '') + '>‹ Prev</button>' +
+        '<span class="findings-page-info">' + (start + 1) + '–' + end + ' of ' + items.length + '</span>' +
+        '<button class="findings-page-btn" data-dir="1"' + (page >= pageCount - 1 ? ' disabled' : '') + '>Next ›</button>';
+      pager.querySelectorAll('.findings-page-btn').forEach(function(b) {
+        b.addEventListener('click', function() {
+          page = Math.max(0, Math.min(pageCount - 1, page + parseInt(b.getAttribute('data-dir'), 10)));
+          renderPage();
+          head.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      });
+    }
+    renderPage();
     return sec;
   }
 
@@ -4194,15 +4312,16 @@
       '<div class="finding-fix"><b>Fix:</b> ' + gEsc(a.fix) + '</div></div>';
   }
 
+  // Delegated so it survives pagination re-renders (rows are replaced per page).
   function wireFindingRows(host) {
-    host.querySelectorAll('.finding-row').forEach(function(row) {
-      row.addEventListener('click', function() {
-        var id = row.getAttribute('data-node');
-        if (!id) return;
-        focusNode(id);
-        var detail = document.querySelector('.graph-main');
-        if (detail) detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      });
+    host.addEventListener('click', function(e) {
+      var row = e.target.closest ? e.target.closest('.finding-row') : null;
+      if (!row || !host.contains(row)) return;
+      var id = row.getAttribute('data-node');
+      if (!id) return;
+      focusNode(id);
+      var detail = document.querySelector('.graph-main');
+      if (detail) detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   }
 
@@ -4291,15 +4410,23 @@
       maxZoom: 3,
       wheelSensitivity: 0.3
     });
+    // Debug handle for support/inspection from the console (read-only graph data
+    // already visible on screen).
+    window.__attackGraph = cyInstance;
 
     // Tapping a node in a focused subgraph re-centers the investigation on it.
+    // Zone parents are non-interactive (events:'no'), but guard defensively.
     cyInstance.on('tap', 'node', function(evt) {
+      if (evt.target.isParent()) return;
+      // The toggle chip expands/collapses its group instead of refocusing.
+      if (evt.target.data('expander')) { toggleGraphGroup(evt.target.data('type')); return; }
       var id = evt.target.id();
       if (id !== currentFocusId) focusNode(id);
     });
 
-    // Keep the GitHub / Cloud domain zones aligned as the user pans/zooms/resizes.
-    cyInstance.on('pan zoom resize', updateGraphZones);
+    // Pointer cursor over the toggle chip signals it's clickable (a control).
+    cyInstance.on('mouseover', 'node[expander]', function() { if (container) container.style.cursor = 'pointer'; });
+    cyInstance.on('mouseout', 'node[expander]', function() { if (container) container.style.cursor = ''; });
 
     showGraphEmptyState();
 
@@ -4367,46 +4494,181 @@
   // ── Domain zones ──────────────────────────────────────────────────
   // Separate what lives inside GitHub from the external cloud/AWS side. The OIDC
   // role + AWS account are the "outside GitHub" set; everything else is GitHub.
-  // Zone rectangles are positioned from live node bounds and re-synced on
-  // pan/zoom/layout (drawn over the canvas with pointer-events:none).
+  // Zones are rendered as real Cytoscape compound parents in renderSubgraph
+  // (true containment), so this set only decides each node's parent zone.
   var CLOUD_TYPES = { oidc_role: 1, aws_account: 1 };
 
-  function positionZone(id, nodes) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    if (!nodes || nodes.length === 0) { el.style.display = 'none'; return; }
-    var bb = nodes.renderedBoundingBox({ includeLabels: true, includeEdges: false });
-    var pad = 24;
-    el.style.display = 'block';
-    el.style.left = (bb.x1 - pad) + 'px';
-    el.style.top = (bb.y1 - pad) + 'px';
-    el.style.width = (bb.w + pad * 2) + 'px';
-    el.style.height = (bb.h + pad * 2) + 'px';
+  // Collapsible node types: when a focused subgraph fans out into many peers of
+  // these types, only the first few are shown and the rest are folded behind a
+  // clickable toggle chip, so dense fan-outs stay readable. The chip stays in
+  // both states — "+N more" when collapsed, "collapse" when expanded — so the
+  // toggle is reversible: tapping again restores the original collapsed state.
+  var COLLAPSE_TYPES = { app: 'GitHub Apps', action: 'Actions' };
+  var COLLAPSE_LIMIT = 2;
+  var graphSg = null, graphOriginId = null, graphExpanded = {};
+
+  function graphRiskRank(r) { return ({ high: 3, medium: 2, low: 1, none: 0 })[r] || 0; }
+
+  // ── Entry-points spotlight ────────────────────────────────────────────────
+  // Classify a node as an attacker entry point by supply-chain class, or null if
+  // it isn't a front door. Triggers that an attacker can reach/initiate count as
+  // a trigger entry; broad credentials as identity; mutable/3rd-party actions as
+  // a dependency (supply-chain) entry.
+  var entryMode = false;
+  var ENTRY_TRIGGERS = { workflow_dispatch: 1, pull_request: 1, pull_request_target: 1, issue_comment: 1, repository_dispatch: 1, workflow_call: 1 };
+  function entryClassFor(n) {
+    var t = n.type, m = n.meta || {};
+    if (t === 'action') return m.pinned === false ? 'supplychain' : null; // mutable tag = hijackable
+    if (t === 'app' || t === 'pat' || t === 'deploy_key' || t === 'sso') return 'identity';
+    if (t === 'workflow') {
+      var trg = m.triggers || [];
+      for (var i = 0; i < trg.length; i++) if (ENTRY_TRIGGERS[trg[i]]) return 'trigger';
+    }
+    return null;
   }
 
-  function updateGraphZones() {
-    if (!cyInstance || cyInstance.nodes().length === 0) { hideGraphZones(); return; }
-    positionZone('zone-github', cyInstance.nodes().filter(function(n) { return !CLOUD_TYPES[n.data('type')]; }));
-    positionZone('zone-cloud',  cyInstance.nodes().filter(function(n) { return CLOUD_TYPES[n.data('type')]; }));
-  }
-
-  function hideGraphZones() {
-    ['zone-github', 'zone-cloud'].forEach(function(id) {
-      var el = document.getElementById(id); if (el) el.style.display = 'none';
+  // applyEntryMode toggles the spotlight on the currently-drawn graph: entries get
+  // a class-colored ring (via em-* classes on the precomputed data.entryClass),
+  // everything else dims. Re-applied after every (re)draw so it survives focus,
+  // expand/collapse, etc.
+  function applyEntryMode() {
+    if (!cyInstance) return;
+    cyInstance.batch(function() {
+      cyInstance.elements().removeClass('em-supplychain em-identity em-trigger entry-dim');
+      if (!entryMode) return;
+      cyInstance.nodes().forEach(function(n) {
+        if (n.isParent() || n.data('expander')) return;
+        var ec = n.data('entryClass');
+        if (ec) n.addClass('em-' + ec); else n.addClass('entry-dim');
+      });
+      cyInstance.edges().addClass('entry-dim');
     });
+  }
+
+  // renderSubgraph stores the subgraph and draws it fresh with every collapsible
+  // group collapsed. drawSubgraph does the actual element build + layout so a
+  // toggle interaction can re-render the same subgraph with new expansion state.
+  function renderSubgraph(sg, originId) {
+    graphSg = sg; graphOriginId = originId; graphExpanded = {};
+    drawSubgraph();
+  }
+
+  // toggleGraphGroup flips a collapsible type between expanded and collapsed
+  // (tapping its chip) and redraws — clicking again returns to the prior state.
+  function toggleGraphGroup(type) {
+    graphExpanded[type] = !graphExpanded[type];
+    drawSubgraph();
   }
 
   // (dagre) layout — far more legible than the full force-directed graph.
-  function renderSubgraph(sg, originId) {
-    if (!cyInstance) return;
-    var nodes = (sg.nodes || []).map(function(n) {
+  function drawSubgraph() {
+    if (!cyInstance || !graphSg) return;
+    var sg = graphSg, originId = graphOriginId;
+    var rawNodes = sg.nodes || [];
+    var rawEdges = sg.edges || [];
+
+    var typeById = {};
+    rawNodes.forEach(function(n) { typeById[n.id] = n.type; });
+
+    // Per collapsible type with enough peers, record a toggle group. Keep the
+    // highest-risk few visible; when collapsed, hide the rest behind the chip.
+    // The group (and its chip) exists in BOTH states so the toggle is reversible.
+    var hidden = {};      // nodeId -> true (collapsed-away)
+    var groups = [];      // { type, hiddenCount, expanded, memberIds }
+    Object.keys(COLLAPSE_TYPES).forEach(function(type) {
+      var ofType = rawNodes.filter(function(n) { return n.type === type && n.id !== originId; });
+      if (ofType.length <= COLLAPSE_LIMIT) return;
+      var sorted = ofType.slice().sort(function(a, b) { return graphRiskRank(b.risk) - graphRiskRank(a.risk); });
+      var expanded = !!graphExpanded[type];
+      if (!expanded) sorted.slice(COLLAPSE_LIMIT).forEach(function(n) { hidden[n.id] = true; });
+      groups.push({
+        type: type, hiddenCount: sorted.length - COLLAPSE_LIMIT, expanded: expanded,
+        memberIds: sorted.map(function(n) { return n.id; })
+      });
+    });
+
+    // Each node is a child of its domain zone (compound parent): GitHub vs the
+    // external Cloud/Production (AWS) side. Real containment — not a coordinate
+    // overlay — so secrets and other GitHub-side nodes can't render inside the
+    // cloud box just because the layout placed them in the same column.
+    var zoneSeen = {};
+    var nodes = [];
+    rawNodes.forEach(function(n) {
+      if (hidden[n.id]) return;
       var type = n.type === 'all_repos' ? 'allrepos' : n.type;
       var entity = n.meta || {};
       if (type === 'allrepos') entity = { total: (n.meta && n.meta.total) || 0 };
-      return { data: { id: n.id, type: type, label: n.label, name: n.label, label2: nodeLabel2(type, n.label), icon: iconDataUri(type), entity: entity, risk: n.risk || 'none' } };
+      var zone = CLOUD_TYPES[type] ? 'zone:cloud' : 'zone:github';
+      zoneSeen[zone] = true;
+      var data = { id: n.id, parent: zone, type: type, label: n.label, name: n.label, label2: nodeLabel2(type, n.label), icon: iconDataUri(type), entity: entity, risk: n.risk || 'none' };
+      // Apps / PAT owners / org carry a real GitHub avatar URL — show the actual
+      // logo instead of the octicon glyph. Read from n.meta (not entity, which is
+      // rebuilt for allrepos and would drop it). Only set when present, so the
+      // node[avatar] selector doesn't match (and blank) glyph-only nodes.
+      var avatarUrl = n.meta && n.meta.avatar;
+      if (avatarUrl) data.avatar = avatarUrl;
+      // Precompute the entry-point class so the spotlight toggle is instant.
+      var ec = entryClassFor(n);
+      if (ec) data.entryClass = ec;
+      // Long-lived high-criticality secrets are crown jewels (a SaaS/infra
+      // boundary), not just generic secrets — mark + label them as such.
+      if (type === 'secret' && n.meta && n.meta.boundary) {
+        data.boundary = 1;
+        data.label2 = '👑 ' + n.label + '\n' + (n.meta.provider || 'Secret');
+      }
+      nodes.push({ data: data });
     });
-    var edges = (sg.edges || []).map(function(e) {
-      return { data: { id: e.id, source: e.source, target: e.target, edgeType: e.type, label: EDGE_LABELS[e.type] || e.type } };
+
+    // One toggle chip per group, in the same zone. Label reflects the current
+    // state so the same node both expands and collapses.
+    groups.forEach(function(g) {
+      var zone = CLOUD_TYPES[g.type] ? 'zone:cloud' : 'zone:github';
+      zoneSeen[zone] = true;
+      var noun = COLLAPSE_TYPES[g.type];
+      var label2 = g.expanded
+        ? 'Show less\n' + noun
+        : 'Show ' + g.hiddenCount + ' more\n' + noun;
+      nodes.push({ data: {
+        id: 'expander:' + g.type, parent: zone, type: g.type, expander: true,
+        expanded: g.expanded ? 1 : 0, label2: label2,
+        icon: chipIconDataUri(g.expanded), risk: 'none'
+      } });
+    });
+
+    var nodeCount = nodes.length;
+    // Prepend only the zone parents that actually have children (a parent must
+    // be added before its children, and an empty zone shouldn't draw a box).
+    var parents = [];
+    if (zoneSeen['zone:github']) parents.push({ data: { id: 'zone:github', zone: 'github', label: 'GitHub' } });
+    if (zoneSeen['zone:cloud'])  parents.push({ data: { id: 'zone:cloud',  zone: 'cloud',  label: 'Cloud · Production (AWS)' } });
+    nodes = parents.concat(nodes);
+
+    // Build edges; reroute any edge touching a hidden node to that type's chip,
+    // de-duplicating so the collapsed group keeps its connections.
+    var edges = [];
+    var edgeSeen = {};
+    function pushEdge(s, t, etype) {
+      if (s === t) return;
+      var key = s + '|' + t + '|' + etype;
+      if (edgeSeen[key]) return;
+      edgeSeen[key] = true;
+      edges.push({ data: { id: key, source: s, target: t, edgeType: etype, label: EDGE_LABELS[etype] || etype } });
+    }
+    rawEdges.forEach(function(e) {
+      var s = hidden[e.source] ? 'expander:' + typeById[e.source] : e.source;
+      var t = hidden[e.target] ? 'expander:' + typeById[e.target] : e.target;
+      pushEdge(s, t, e.type);
+    });
+    // An expanded group hides nothing, so its chip has no rerouted edges — wire it
+    // to the group's neighbors so the "collapse" chip sits with its members.
+    groups.forEach(function(g) {
+      if (!g.expanded) return;
+      var member = {};
+      g.memberIds.forEach(function(id) { member[id] = true; });
+      rawEdges.forEach(function(e) {
+        if (member[e.source]) pushEdge('expander:' + g.type, e.target, e.type);
+        else if (member[e.target]) pushEdge(e.source, 'expander:' + g.type, e.type);
+      });
     });
 
     cyInstance.elements().remove();
@@ -4418,6 +4680,7 @@
     var layout = cyInstance.layout({ name: 'dagre', rankDir: 'LR', nodeSep: 48, rankSep: 130, edgeSep: 24, fit: true, padding: 60, animate: true, animationDuration: 350, animationEasing: 'ease-out' });
     layout.one('layoutstop', function() {
       cyInstance.resize();
+      separateZones();
       cyInstance.fit(undefined, 50);
       // Don't let a wide path shrink into unreadability — keep a sensible minimum
       // zoom and center on the entry point; the user pans from there.
@@ -4426,7 +4689,6 @@
         var s = cyInstance.getElementById(originId);
         if (s && s.length) cyInstance.center(s);
       }
-      updateGraphZones();
     });
     layout.run();
 
@@ -4440,18 +4702,41 @@
       if (src) src.addClass('blast-source');
     });
     startEdgeFlow();
+    applyEntryMode(); // re-apply the spotlight if it's currently on
 
     var statsEl = document.getElementById('graph-stats');
     if (statsEl) {
-      var note = nodes.length > 180 ? ' · large blast radius — see summary panel' : '';
-      statsEl.textContent = nodes.length + ' nodes, ' + edges.length + ' edges' + note;
+      var note = nodeCount > 180 ? ' · large blast radius — see summary panel' : '';
+      statsEl.textContent = nodeCount + ' nodes, ' + edges.length + ' edges' + note;
     }
+  }
+
+  // separateZones pushes the Cloud cluster clear of the GitHub cluster after
+  // layout. cytoscape-dagre lays out only leaf nodes and draws zone parents
+  // around them afterward — dagre never sees the clusters, so the two zone boxes
+  // can overlap in the shared column (a secret and an OIDC role sit at the same
+  // depth). Shifting the cloud leaves right guarantees their bounding boxes — and
+  // therefore the drawn zone rectangles — never overlap, so a GitHub-side node
+  // can't render inside the red Cloud box. No-op when already separated.
+  function separateZones() {
+    if (!cyInstance) return;
+    var leaves = cyInstance.nodes().filter(function(n) { return !n.isParent(); });
+    var gh = leaves.filter(function(n) { return n.data('parent') === 'zone:github'; });
+    var cl = leaves.filter(function(n) { return n.data('parent') === 'zone:cloud'; });
+    if (!gh.length || !cl.length) return;
+    var gap = 130; // ≈ rankSep, plus room for the two boxes' padding
+    var delta = (gh.boundingBox().x2 + gap) - cl.boundingBox().x1;
+    if (delta <= 0) return; // dagre already left a gap; nothing to do
+    cl.positions(function(ele) {
+      var p = ele.position();
+      return { x: p.x + delta, y: p.y };
+    });
   }
 
   function clearGraphFocus() {
     currentFocusId = null;
     stopEdgeFlow();
-    hideGraphZones();
+    setEntryMode(false); // reset the spotlight when leaving the graph
     if (cyInstance) cyInstance.elements().remove();
     var empty = document.getElementById('graph-empty'); if (empty) empty.style.display = 'flex';
     var crumb = document.getElementById('graph-focus-crumb'); if (crumb) crumb.style.display = 'none';
@@ -4839,6 +5124,19 @@
 
   document.getElementById('graph-fit-btn').addEventListener('click', function() {
     if (cyInstance && cyInstance.elements().length) cyInstance.fit(undefined, 40);
+  });
+
+  // Entry-points spotlight toggle.
+  function setEntryMode(on) {
+    entryMode = on;
+    var btn = document.getElementById('graph-entry-btn');
+    if (btn) btn.classList.toggle('active', on);
+    var legend = document.getElementById('graph-entry-legend');
+    if (legend) legend.style.display = on ? 'flex' : 'none';
+    applyEntryMode();
+  }
+  document.getElementById('graph-entry-btn').addEventListener('click', function() {
+    setEntryMode(!entryMode);
   });
 
   document.getElementById('graph-clear-btn').addEventListener('click', function() {

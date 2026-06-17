@@ -47,8 +47,11 @@ type PATRequest struct {
 
 type AppInstallation struct {
 	ID                  int64        `json:"id"`
+	AppID               int64        `json:"app_id"`
 	AppName             string       `json:"app_name"`
 	AppSlug             string       `json:"app_slug"`
+	AvatarURL           string       `json:"avatar_url"`     // the app's own logo (/in/<app_id>)
+	OrgAvatarURL        string       `json:"org_avatar_url"` // the org/account the app is installed on
 	Permissions         []Permission `json:"permissions"`
 	Events              []string     `json:"events"`
 	RepositorySelection string       `json:"repository_selection"`

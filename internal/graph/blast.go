@@ -70,7 +70,54 @@ func (g *Graph) subgraph(originID string, res *BlastResult) Subgraph {
 			sg.Edges = append(sg.Edges, e)
 		}
 	}
+	refineActionPinning(&sg)
 	return sg
+}
+
+// refineActionPinning recomputes each action node's pinned/risk WITHIN this
+// subgraph from the actual usages present (the can_hijack edges, which carry
+// per-workflow pin status). The action node is deduped org-wide, so without this
+// a focused view would show an action as unpinned/high just because the same
+// action is unpinned in some OTHER workflow. Mutates copies in sg only.
+func refineActionPinning(sg *Subgraph) {
+	usesByAction := map[string][]bool{}
+	for _, e := range sg.Edges {
+		if e.Type == EdgeCanHijack {
+			usesByAction[e.Source] = append(usesByAction[e.Source], e.Pinned)
+		}
+	}
+	for i := range sg.Nodes {
+		n := &sg.Nodes[i]
+		if n.Type != NodeAction {
+			continue
+		}
+		uses, ok := usesByAction[n.ID]
+		if !ok {
+			continue
+		}
+		anyUnpinned := false
+		for _, pinned := range uses {
+			if !pinned {
+				anyUnpinned = true
+				break
+			}
+		}
+		// Copy the shared meta map before mutating so we don't corrupt the org graph.
+		meta := make(map[string]any, len(n.Meta)+1)
+		for k, v := range n.Meta {
+			meta[k] = v
+		}
+		meta["pinned"] = !anyUnpinned
+		n.Meta = meta
+		// Risk mirrors the findings' trust gate: an unpinned usage is "high" only
+		// for non-first-party actions (a moved tag on actions/* can't be hijacked).
+		owner, _ := n.Meta["owner"].(string)
+		if anyUnpinned && actionTrust(owner) != trustFirstParty {
+			n.Risk = "high"
+		} else {
+			n.Risk = "low"
+		}
+	}
 }
 
 // traverse runs BFS from start over the given adjacency map, collecting reached

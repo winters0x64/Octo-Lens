@@ -70,6 +70,10 @@ type Edge struct {
 	Target string `json:"target"`
 	Type   string `json:"type"`
 	Label  string `json:"label"`
+	// Pinned is meaningful only on can_hijack edges: whether THIS usage of the
+	// action (in this specific workflow) is pinned to a commit SHA. The action
+	// NODE is deduped org-wide, so pin-status must live on the usage, not the node.
+	Pinned bool `json:"pinned,omitempty"`
 }
 
 // Graph holds nodes, edges, and adjacency indexes for traversal.
@@ -77,9 +81,10 @@ type Graph struct {
 	Nodes []Node `json:"nodes"`
 	Edges []Edge `json:"edges"`
 
-	byID map[string]*Node
-	out  map[string][]string // node id -> downstream node ids
-	in   map[string][]string // node id -> upstream node ids
+	byID    map[string]*Node
+	out     map[string][]string // node id -> downstream node ids
+	in      map[string][]string // node id -> upstream node ids
+	edgeIdx map[string]int      // "src|dst|type" -> index into Edges (built after sort)
 }
 
 // Build constructs the reachability graph from an org report.
@@ -90,7 +95,8 @@ func Build(r *models.OrgReport) *Graph {
 			out:  map[string][]string{},
 			in:   map[string][]string{},
 		},
-		edgeSeen: map[string]bool{},
+		edgeSeen:  map[string]bool{},
+		edgeIndex: map[string]int{},
 	}
 
 	repos := collectRepos(r)
@@ -109,13 +115,34 @@ func Build(r *models.OrgReport) *Graph {
 		b.g.Nodes = append(b.g.Nodes, *b.g.byID[id])
 	}
 	b.g.sortDeterministic()
+	b.g.buildEdgeIdx()
 	return b.g
 }
 
+// buildEdgeIdx indexes edges by "src|dst|type" for O(1) lookup. Built after
+// sortDeterministic so the stored indices stay valid.
+func (g *Graph) buildEdgeIdx() {
+	g.edgeIdx = make(map[string]int, len(g.Edges))
+	for i := range g.Edges {
+		e := g.Edges[i]
+		g.edgeIdx[e.Source+"|"+e.Target+"|"+e.Type] = i
+	}
+}
+
+// edgePinned reports whether the edge (src->dst of the given type) is marked
+// pinned. For can_hijack edges this is the per-workflow pin status of the action.
+func (g *Graph) edgePinned(src, dst, typ string) bool {
+	if i, ok := g.edgeIdx[src+"|"+dst+"|"+typ]; ok {
+		return g.Edges[i].Pinned
+	}
+	return false
+}
+
 type builder struct {
-	g        *Graph
-	order    []string // node ids in insertion order
-	edgeSeen map[string]bool
+	g         *Graph
+	order     []string       // node ids in insertion order
+	edgeSeen  map[string]bool
+	edgeIndex map[string]int // edge key -> index into g.Edges (for in-place updates)
 
 	// secret lookup indexes for resolving workflow -> secret edges
 	orgSecrets  map[string]string            // name -> node id
@@ -139,15 +166,29 @@ func (b *builder) addNode(id, typ, label, risk string, meta map[string]any) {
 func (b *builder) hasNode(id string) bool { _, ok := b.g.byID[id]; return ok }
 
 func (b *builder) addEdge(src, dst, typ, label string) {
+	b.addEdgePinned(src, dst, typ, label, false)
+}
+
+// addEdgePinned is addEdge plus a per-usage pinned flag (used by can_hijack edges
+// so pin-status lives on the usage, not the org-wide-deduped action node).
+func (b *builder) addEdgePinned(src, dst, typ, label string, pinned bool) {
 	if src == dst || !b.hasNode(src) || !b.hasNode(dst) {
 		return
 	}
 	key := src + "|" + dst + "|" + typ
 	if b.edgeSeen[key] {
+		// Same usage edge already recorded. If this occurrence is unpinned, it
+		// makes the whole usage hijackable — let unpinned win over a prior pinned.
+		if !pinned {
+			if i, ok := b.edgeIndex[key]; ok {
+				b.g.Edges[i].Pinned = false
+			}
+		}
 		return
 	}
 	b.edgeSeen[key] = true
-	b.g.Edges = append(b.g.Edges, Edge{ID: key, Source: src, Target: dst, Type: typ, Label: label})
+	b.edgeIndex[key] = len(b.g.Edges)
+	b.g.Edges = append(b.g.Edges, Edge{ID: key, Source: src, Target: dst, Type: typ, Label: label, Pinned: pinned})
 	b.g.out[src] = append(b.g.out[src], dst)
 	b.g.in[dst] = append(b.g.in[dst], src)
 }
@@ -159,7 +200,7 @@ func (b *builder) addPrincipals(r *models.OrgReport, repoCount int) {
 	ensureAllRepos := func() {
 		if !allReposAdded {
 			b.addNode(NodeAllRepos, NodeAllRepos, "All repositories", "high",
-				map[string]any{"total": repoCount})
+				map[string]any{"total": repoCount, "avatar": orgAvatarFromApps(r.Apps)})
 			// all_repos reaches every repo
 			for _, id := range b.order {
 				if n := b.g.byID[id]; n.Type == NodeRepo {
@@ -178,6 +219,7 @@ func (b *builder) addPrincipals(r *models.OrgReport, repoCount int) {
 		}
 		b.addNode(id, NodePAT, p.TokenName, risk, map[string]any{
 			"owner": p.OwnerLogin, "repository_selection": p.RepositorySelection,
+			"avatar": p.OwnerAvatarURL,
 		})
 		if p.RepositorySelection == "all" {
 			ensureAllRepos()
@@ -195,6 +237,7 @@ func (b *builder) addPrincipals(r *models.OrgReport, repoCount int) {
 		}
 		b.addNode(id, NodeApp, a.AppName, risk, map[string]any{
 			"repository_selection": a.RepositorySelection, "suspended": a.Suspended,
+			"avatar": a.AvatarURL,
 		})
 		if a.RepositorySelection == "all" {
 			ensureAllRepos()
@@ -230,10 +273,15 @@ func (b *builder) indexSecrets(r *models.OrgReport) {
 
 	for _, s := range r.Secrets {
 		id := secretID(s)
-		b.addNode(id, NodeSecret, s.Name, secretRisk(s), map[string]any{
+		cls := classifySecret(s.Name)
+		b.addNode(id, NodeSecret, s.Name, secretNodeRisk(s, cls), map[string]any{
 			"scope": s.Scope, "visibility": s.Visibility,
 			"repo_name": s.RepoName, "env_name": s.EnvName,
 			"updated_at": s.UpdatedAt,
+			// Supply-chain classification: what this secret unlocks and whether a
+			// compromised job reaching it constitutes a path to production.
+			"category": cls.Category, "provider": cls.Provider, "target": cls.Target,
+			"criticality": cls.Criticality, "boundary": cls.Boundary, "long_lived": cls.LongLived,
 		})
 		switch s.Scope {
 		case "org":
@@ -318,7 +366,11 @@ func (b *builder) addWorkflows(r *models.OrgReport) {
 			}
 		}
 		for _, a := range actions {
-			if a.Kind == "local" || a.Kind == "docker" {
+			// Skip local (./), docker, and same-repo cross-path references. A
+			// `uses: <org>/<thisRepo>/.github/actions/x@ref` is the workflow's OWN
+			// repo code (equivalent to ./x) — first-party, not a third-party
+			// dependency — so it must not be treated as a supply-chain entry point.
+			if a.Kind == "local" || a.Kind == "docker" || isSelfRepoAction(a, r.Org, wf.RepoName) {
 				continue
 			}
 			aid := actionID(a)
@@ -326,7 +378,7 @@ func (b *builder) addWorkflows(r *models.OrgReport) {
 				continue
 			}
 			b.upsertAction(aid, a)
-			b.addEdge(aid, wid, EdgeCanHijack, hijackLabel(a))
+			b.addEdgePinned(aid, wid, EdgeCanHijack, hijackLabel(a), a.Pinned)
 		}
 
 		// secrets the workflow can read
@@ -431,6 +483,35 @@ func collectRepos(r *models.OrgReport) map[string]bool {
 		add(dk.RepoName)
 	}
 	return repos
+}
+
+// isSelfRepoAction reports whether a cross-repo action reference actually points
+// at the workflow's OWN repository — e.g. a workflow in scapia/security-stage
+// using `scapia/security-stage/.github/actions/x@master`. That's the same repo's
+// code (equivalent to a local ./x action), first-party, not a third-party
+// dependency — so it shouldn't count as a supply-chain / hijack entry point.
+func isSelfRepoAction(a models.ActionRef, org, repo string) bool {
+	if org == "" || repo == "" || a.Owner == "" {
+		return false
+	}
+	seg := a.Name // owner stripped already; first segment is the repo
+	if i := strings.Index(seg, "/"); i != -1 {
+		seg = seg[:i]
+	}
+	return strings.EqualFold(a.Owner, org) && strings.EqualFold(seg, repo)
+}
+
+// orgAvatarFromApps returns the org's avatar URL, taken from any installed
+// app's account (the org the apps are installed on). Sourcing it from the
+// persisted app records means it survives a cache reload, unlike a transient
+// report-level field.
+func orgAvatarFromApps(apps []models.AppInstallation) string {
+	for _, a := range apps {
+		if a.OrgAvatarURL != "" {
+			return a.OrgAvatarURL
+		}
+	}
+	return ""
 }
 
 func isProdLike(env string) bool {

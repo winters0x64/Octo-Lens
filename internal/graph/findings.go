@@ -70,11 +70,14 @@ func (g *Graph) Findings() Findings {
 
 	sortPaths(f.Paths)
 	f.Actions = dedupeSortActions(f.Actions)
-	if len(f.Paths) > 40 {
-		f.Paths = f.Paths[:40]
+	// Cap generously: now that long-lived secrets count as boundaries there are
+	// many more legitimate paths, and capping at 40 would hide whole classes
+	// (e.g. the OIDC/cloud paths got buried under critical secret pwn-requests).
+	if len(f.Paths) > 200 {
+		f.Paths = f.Paths[:200]
 	}
-	if len(f.Actions) > 40 {
-		f.Actions = f.Actions[:40]
+	if len(f.Actions) > 60 {
+		f.Actions = f.Actions[:60]
 	}
 	return f
 }
@@ -88,6 +91,7 @@ type wfFacts struct {
 	selfHosted     bool
 	triggers       []string
 	secrets        []*Node
+	boundarySecrets []*Node // long-lived high-criticality creds = path-to-prod boundaries
 	roles          []*Node
 	prodEnvs       []*Node
 	unpinnedActs   []*Node // all unpinned (incl. first-party)
@@ -104,6 +108,11 @@ func (g *Graph) workflowFacts(n Node) wfFacts {
 	w.triggers = toStringSlice(n.Meta["triggers"])
 
 	w.secrets = g.outOfType(n.ID, NodeSecret)
+	for _, s := range w.secrets {
+		if b, _ := s.Meta["boundary"].(bool); b {
+			w.boundarySecrets = append(w.boundarySecrets, s)
+		}
+	}
 	w.roles = g.outOfType(n.ID, NodeOIDCRole)
 	for _, e := range g.outOfType(n.ID, NodeEnv) {
 		if e.Risk == "high" { // prod-like
@@ -111,11 +120,15 @@ func (g *Graph) workflowFacts(n Node) wfFacts {
 		}
 	}
 	for _, a := range g.inOfType(n.ID, NodeAction) {
-		if pinned, _ := a.Meta["pinned"].(bool); !pinned {
-			w.unpinnedActs = append(w.unpinnedActs, a)
-			if owner, _ := a.Meta["owner"].(string); actionTrust(owner) != trustFirstParty {
-				w.unpinnedRisky = append(w.unpinnedRisky, a) // hijack risk is real only off the trusted namespaces
-			}
+		// Pin-status is per-usage: read the can_hijack edge for THIS workflow, not
+		// the org-wide-deduped action node (which is "unpinned" if the action is
+		// unpinned in any other workflow — a false positive for this one).
+		if g.edgePinned(a.ID, n.ID, EdgeCanHijack) {
+			continue
+		}
+		w.unpinnedActs = append(w.unpinnedActs, a)
+		if owner, _ := a.Meta["owner"].(string); actionTrust(owner) != trustFirstParty {
+			w.unpinnedRisky = append(w.unpinnedRisky, a) // hijack risk is real only off the trusted namespaces
 		}
 	}
 	return w
@@ -161,9 +174,11 @@ func trustLabel(t string) string {
 }
 
 // buildPath emits an attack path when the workflow reaches a production
-// boundary (an OIDC role or a prod-like environment).
+// boundary: an OIDC role, a prod-like environment, OR a long-lived
+// high-criticality secret (a SaaS/infra credential a compromised job can
+// exfiltrate and reuse directly).
 func (g *Graph) buildPath(w wfFacts) (AttackPath, bool) {
-	if len(w.roles) == 0 && len(w.prodEnvs) == 0 {
+	if len(w.roles) == 0 && len(w.prodEnvs) == 0 && len(w.boundarySecrets) == 0 {
 		return AttackPath{}, false
 	}
 
@@ -178,6 +193,9 @@ func (g *Graph) buildPath(w wfFacts) (AttackPath, bool) {
 	if len(w.unpinnedRisky) > 0 {
 		factors = append(factors, "unpinned-actions")
 	}
+	if len(w.boundarySecrets) > 0 {
+		factors = append(factors, "long-lived-secret")
+	}
 	if w.selfHosted {
 		factors = append(factors, "self-hosted")
 	}
@@ -186,18 +204,25 @@ func (g *Graph) buildPath(w wfFacts) (AttackPath, bool) {
 	}
 
 	// Severity: untrusted trigger reaching prod is the classic pwn-request -> critical.
+	// A long-lived crown-jewel secret keeps it high even on a manual trigger.
 	sev := "high"
 	if dangerous {
 		sev = "critical"
-	} else if w.perms != "write-all" && len(w.unpinnedRisky) == 0 && onlyManual(w.triggers) {
+	} else if w.perms != "write-all" && len(w.unpinnedRisky) == 0 && len(w.boundarySecrets) == 0 && onlyManual(w.triggers) {
 		sev = "medium"
 	}
 
+	// Boundary precedence: OIDC role > prod env > long-lived secret.
 	boundary, btype := "", ""
-	if len(w.roles) > 0 {
+	var boundarySecret *Node
+	switch {
+	case len(w.roles) > 0:
 		boundary, btype = w.roles[0].Label, NodeOIDCRole
-	} else {
+	case len(w.prodEnvs) > 0:
 		boundary, btype = w.prodEnvs[0].Label, NodeEnv
+	default:
+		boundarySecret = pickBoundarySecret(w.boundarySecrets)
+		boundary, btype = boundarySecret.Label, NodeSecret
 	}
 
 	steps := []PathStep{{Kind: "trigger", Label: trig, Note: triggerNote(dangerous)}}
@@ -206,21 +231,32 @@ func (g *Graph) buildPath(w wfFacts) (AttackPath, bool) {
 		wfNote = appendNote(wfNote, itoa(int64(len(w.unpinnedRisky)))+" unpinned 3rd-party")
 	}
 	steps = append(steps, PathStep{Kind: "workflow", Label: w.repo + " / " + w.node.Label, Note: wfNote})
-	if len(w.secrets) > 0 {
-		steps = append(steps, PathStep{Kind: "secret", Label: secretsLabel(w.secrets), Note: ""})
-	}
-	steps = append(steps, PathStep{Kind: btype, Label: boundary})
 
-	// When the boundary is an OIDC role, extend the path to the AWS account.
 	account := ""
-	if btype == NodeOIDCRole && len(w.roles) > 0 {
-		arn, _ := w.roles[0].Meta["arn"].(string)
-		acct, known := AWSAccountFromARN(arn)
-		if known {
-			account = acct
-			steps = append(steps, PathStep{Kind: "aws_account", Label: acct, Note: "AWS account"})
-		} else {
-			steps = append(steps, PathStep{Kind: "aws_account", Label: "unknown", Note: "templated — resolved at runtime"})
+	if btype == NodeSecret {
+		// The long-lived secret is itself the target / crown jewel.
+		prov, _ := boundarySecret.Meta["provider"].(string)
+		tgt, _ := boundarySecret.Meta["target"].(string)
+		note := prov
+		if tgt != "" {
+			note = appendNote(prov, "→ "+tgt)
+		}
+		steps = append(steps, PathStep{Kind: "secret", Label: boundarySecret.Label, Note: note})
+	} else {
+		if len(w.secrets) > 0 {
+			steps = append(steps, PathStep{Kind: "secret", Label: secretsLabel(w.secrets), Note: ""})
+		}
+		steps = append(steps, PathStep{Kind: btype, Label: boundary})
+		// When the boundary is an OIDC role, extend the path to the AWS account.
+		if btype == NodeOIDCRole && len(w.roles) > 0 {
+			arn, _ := w.roles[0].Meta["arn"].(string)
+			acct, known := AWSAccountFromARN(arn)
+			if known {
+				account = acct
+				steps = append(steps, PathStep{Kind: "aws_account", Label: acct, Note: "AWS account"})
+			} else {
+				steps = append(steps, PathStep{Kind: "aws_account", Label: "unknown", Note: "templated — resolved at runtime"})
+			}
 		}
 	}
 
@@ -464,10 +500,39 @@ func pathWhy(dangerous bool, trig string, w wfFacts) string {
 	if dangerous {
 		return "A " + trig + " trigger runs attacker-controllable code with access to production credentials — the classic 'pwn request'. Code from a fork can exfiltrate the secret or assume the cloud role."
 	}
+	// Long-lived secret target with no cloud-role/env boundary: the secret itself
+	// is the crown jewel a compromised build step can steal and reuse.
+	if len(w.roles) == 0 && len(w.prodEnvs) == 0 && len(w.boundarySecrets) > 0 {
+		s := pickBoundarySecret(w.boundarySecrets)
+		prov, _ := s.Meta["provider"].(string)
+		tgt, _ := s.Meta["target"].(string)
+		if tgt == "" {
+			tgt = "external infrastructure"
+		}
+		extra := ""
+		if ll, _ := s.Meta["long_lived"].(bool); ll {
+			extra = " It is long-lived (no expiry or sub-scoping), so a single exfiltration grants durable access — worse than a short-lived OIDC token."
+		}
+		return "A compromised build step in this workflow can read " + prov + " " + s.Label + " and use it directly against " + tgt + "." + extra
+	}
 	if w.perms == "write-all" || len(w.unpinnedRisky) > 0 {
 		return "This workflow reaches a production boundary and is weakly isolated (" + factorsPhrase(w) + "), so a compromised build step can pivot to production."
 	}
 	return "This workflow can assume a production cloud role / deploy to a production environment."
+}
+
+// pickBoundarySecret returns the most critical long-lived secret (critical
+// before high), falling back to the first.
+func pickBoundarySecret(secrets []*Node) *Node {
+	for _, s := range secrets {
+		if c, _ := s.Meta["criticality"].(string); c == "critical" {
+			return s
+		}
+	}
+	if len(secrets) > 0 {
+		return secrets[0]
+	}
+	return nil
 }
 
 // triggerExposure describes how (and by whom) the workflow's trigger can be
@@ -510,6 +575,19 @@ func pathFixes(dangerous bool, w wfFacts) []string {
 	}
 	if len(w.roles) > 0 {
 		f = append(f, "Scope the IAM role's trust policy to this exact repo and branch (the token.actions.githubusercontent.com:sub condition), and least-privilege the role's AWS permissions.")
+	}
+	if len(w.boundarySecrets) > 0 {
+		static := false
+		for _, s := range w.boundarySecrets {
+			switch c, _ := s.Meta["category"].(string); c {
+			case "aws_static", "gcp_sa", "azure":
+				static = true
+			}
+		}
+		if static {
+			f = append(f, "Replace the long-lived static cloud key with short-lived OIDC federation (a sub-scoped role via configure-aws-credentials / azure-login / google-github-actions auth), then delete and rotate the static key.")
+		}
+		f = append(f, "Treat these long-lived credentials as crown jewels: move them to a protected environment with required reviewers, scope each token to the minimum, and rotate on a schedule.")
 	}
 	if len(w.secrets) > 0 {
 		f = append(f, "Move the referenced secrets to a protected environment and rotate any that are over-exposed; pass only the specific secrets this job needs.")
