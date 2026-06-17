@@ -491,19 +491,22 @@ func (s *Server) ListenAndServe(cfg Config) error {
 			s.mu.Unlock()
 			log.Printf("Loaded cached report from DB: %d PATs, %d apps, %d secrets, %d deploy keys",
 				len(cached.PATs), len(cached.Apps), len(cached.Secrets), len(cached.DeployKeys))
-			go s.runScan(ctx)
+			// Use context.Background() so a SIGTERM during rolling deployment
+			// doesn't cancel the scan mid-way through 308 repos.
+			go s.runScan(context.Background())
 		} else {
 			// First run (empty DB) — scan in the background so the dashboard is
 			// reachable immediately; API endpoints return 503 until data lands.
 			log.Printf("No cached data found, running initial scan in background...")
-			go s.runScan(ctx)
+			go s.runScan(context.Background())
 		}
 	} else {
 		// No Postgres — blocking scan.
 		s.runScan(context.Background())
 	}
 
-	// Scheduled rescans
+	// Scheduled rescans — use context.Background() so SIGTERM (ECS rolling
+	// deployment drain) doesn't cancel a scan that's mid-way through repos.
 	if cfg.ScanInterval > 0 {
 		go s.scheduledScan(ctx, cfg.ScanInterval)
 		log.Printf("Scheduled scanning every %s", cfg.ScanInterval)
@@ -551,7 +554,10 @@ func (s *Server) scheduledScan(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runScan(ctx)
+			// context.Background() — scan must not be canceled by SIGTERM/shutdown.
+			// The ticker loop itself still respects ctx so we stop scheduling new
+			// scans on shutdown, but any in-flight scan runs to completion.
+			go s.runScan(context.Background())
 		}
 	}
 }

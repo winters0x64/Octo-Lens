@@ -115,6 +115,9 @@ func (s *GitHubService) ListEnvironmentSecrets(ctx context.Context, repoID int64
 func (s *GitHubService) ListAllSecrets(ctx context.Context, repos []*gh.Repository) ([]models.OrgSecret, error) {
 	var allSecrets []models.OrgSecret
 
+	// Fetch secret creators from audit log (non-fatal if unavailable).
+	creators, _ := s.FetchSecretCreators(ctx)
+
 	// 1. Org-level secrets
 	orgSecrets, err := s.ListOrgSecrets(ctx)
 	if err != nil {
@@ -155,12 +158,24 @@ func (s *GitHubService) ListAllSecrets(ctx context.Context, repos []*gh.Reposito
 		}
 	}
 
-	// Mark stale secrets (not updated in 365 days)
+	// Enrich with creator from audit log and mark stale secrets.
 	oneYearAgo := time.Now().Add(-365 * 24 * time.Hour)
 	for i := range allSecrets {
-		if allSecrets[i].UpdatedAt.Before(oneYearAgo) {
-			if allSecrets[i].Risk == models.RiskLow {
-				allSecrets[i].Risk = models.RiskMedium
+		// Look up creator: try repo key first, fall back to org key.
+		sec := &allSecrets[i]
+		if sec.RepoName != "" {
+			if actor, ok := creators["repo/"+sec.RepoName+":"+sec.Name]; ok {
+				sec.CreatedBy = actor
+			}
+		} else {
+			if actor, ok := creators["org:"+sec.Name]; ok {
+				sec.CreatedBy = actor
+			}
+		}
+
+		if sec.UpdatedAt.Before(oneYearAgo) {
+			if sec.Risk == models.RiskLow {
+				sec.Risk = models.RiskMedium
 			}
 		}
 	}

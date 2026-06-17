@@ -87,6 +87,7 @@ type OrgSecret struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	Risk       RiskLevel  `json:"risk"`
+	CreatedBy  string     `json:"created_by"`  // from audit log; empty if >90 days or Enterprise not available
 }
 
 // DeployKey represents an SSH deploy key on a repository.

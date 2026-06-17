@@ -47,6 +47,68 @@ func (s *GitHubService) ListAuditLog(ctx context.Context) ([]models.AuditLogEntr
 	return allEntries, nil
 }
 
+// FetchSecretCreators queries the audit log for secret creation events and
+// returns a map of secret name → creator login. Keys use the format:
+//   "org:SECRET_NAME"         for org-level secrets
+//   "repo/REPO:SECRET_NAME"   for repo-level secrets
+// Only available on GitHub Enterprise Cloud; returns empty map otherwise.
+func (s *GitHubService) FetchSecretCreators(ctx context.Context) (map[string]string, error) {
+	creators := make(map[string]string)
+
+	phrases := []string{
+		"action:org.actions_secret_created",
+		"action:repo.actions_secret_created",
+		"action:environment.create_actions_secret",
+	}
+
+	for _, phrase := range phrases {
+		url := fmt.Sprintf("orgs/%s/audit-log?phrase=%s&per_page=100&include=api", s.org, phrase)
+		req, err := s.client.NewRequest("GET", url, nil)
+		if err != nil {
+			return creators, nil // non-fatal
+		}
+
+		var raw []struct {
+			Action string `json:"action"`
+			Actor  string `json:"actor"`
+			Repo   string `json:"repo"`
+			// GitHub returns the secret name in different fields depending on scope
+			SecretName    string `json:"secret_name"`
+			Name          string `json:"name"`
+		}
+		if _, err := s.client.Do(ctx, req, &raw); err != nil {
+			return creators, nil // non-fatal: audit log not on non-Enterprise orgs
+		}
+
+		for _, e := range raw {
+			name := e.SecretName
+			if name == "" {
+				name = e.Name
+			}
+			if name == "" || e.Actor == "" {
+				continue
+			}
+			var key string
+			if e.Repo != "" {
+				// repo is "org/repo-name"
+				parts := e.Repo
+				if idx := len(s.org) + 1; idx < len(parts) {
+					parts = parts[idx:]
+				}
+				key = "repo/" + parts + ":" + name
+			} else {
+				key = "org:" + name
+			}
+			// Keep the most recent actor (first entry is newest in audit log)
+			if _, exists := creators[key]; !exists {
+				creators[key] = e.Actor
+			}
+		}
+	}
+
+	return creators, nil
+}
+
 func (s *GitHubService) fetchAuditEntries(ctx context.Context, phrase string) ([]models.AuditLogEntry, error) {
 	var entries []models.AuditLogEntry
 

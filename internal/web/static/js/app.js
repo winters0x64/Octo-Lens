@@ -2028,6 +2028,7 @@
       { key: 'env_name', label: 'Environment' },
       { key: 'visibility', label: 'Visibility' },
       { key: 'updated_at', label: 'Last Updated' },
+      { key: 'created_by', label: 'Created By' },
       { key: '', label: 'Risk' },
       { key: '', label: 'Actions' },
     ];
@@ -2078,6 +2079,24 @@
       } else { visCell.textContent = '-'; }
       tr.appendChild(visCell);
       addCell(tr, s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '-');
+
+      // Created By — from audit log
+      var creatorCell = document.createElement('td');
+      if (s.created_by) {
+        var creatorLink = document.createElement('a');
+        creatorLink.href = 'https://github.com/' + s.created_by;
+        creatorLink.target = '_blank';
+        creatorLink.rel = 'noopener';
+        creatorLink.style.cssText = 'color:var(--accent);font-size:12px;text-decoration:none';
+        creatorLink.textContent = '@' + s.created_by;
+        creatorCell.appendChild(creatorLink);
+      } else {
+        creatorCell.textContent = '—';
+        creatorCell.style.color = 'var(--text-muted)';
+        creatorCell.style.fontSize = '12px';
+      }
+      tr.appendChild(creatorCell);
+
       var riskCell = document.createElement('td');
       var riskBadge = document.createElement('span');
       riskBadge.className = 'risk-badge-inline ' + assessment.level;
@@ -2121,7 +2140,7 @@
       tr.appendChild(actCell);
 
       tr.addEventListener('click', function() {
-        toggleDetailRow(tr, function() { return renderSecretDetailPanel(s, 8); });
+        toggleDetailRow(tr, function() { return renderSecretDetailPanel(s, 9); });
       });
 
       tbody.appendChild(tr);
