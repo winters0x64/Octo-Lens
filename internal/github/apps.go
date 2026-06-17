@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	gh "github.com/google/go-github/v68/github"
 
@@ -31,11 +32,23 @@ func (s *GitHubService) ListInstalledApps(ctx context.Context) ([]models.AppInst
 	return result, nil
 }
 
+// appAvatarURL builds the public avatar URL for a GitHub App ("integration").
+// App avatars live under the /in/<app_id> path on avatars.githubusercontent.com.
+func appAvatarURL(appID int64) string {
+	if appID == 0 {
+		return ""
+	}
+	return "https://avatars.githubusercontent.com/in/" + strconv.FormatInt(appID, 10) + "?s=128"
+}
+
 func mapInstallation(inst *gh.Installation) models.AppInstallation {
 	app := models.AppInstallation{
 		ID:                  inst.GetID(),
+		AppID:               inst.GetAppID(),
 		AppSlug:             inst.GetAppSlug(),
 		AppName:             inst.GetAppSlug(),
+		AvatarURL:           appAvatarURL(inst.GetAppID()),
+		OrgAvatarURL:        inst.GetAccount().GetAvatarURL(),
 		RepositorySelection: inst.GetRepositorySelection(),
 		CreatedAt:           inst.GetCreatedAt().Time,
 		UpdatedAt:           inst.GetUpdatedAt().Time,

@@ -175,6 +175,14 @@ func (g *Graph) pathsToProd() []Path {
 						Boundary: t.Label, BoundaryType: NodeEnv, Via: via, Risk: riskOfPath(via),
 					})
 				}
+			case NodeSecret:
+				// Long-lived high-criticality secret = a SaaS/infra boundary too.
+				if b, _ := t.Meta["boundary"].(bool); b {
+					out = append(out, Path{
+						WorkflowID: n.ID, WorkflowLabel: n.Label, Repo: repo,
+						Boundary: t.Label, BoundaryType: NodeSecret, Via: via, Risk: "high",
+					})
+				}
 			}
 		}
 	}

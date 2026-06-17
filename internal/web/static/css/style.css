@@ -1415,22 +1415,24 @@ tr.diff-new td:first-child { border-left: 2px solid rgba(0,227,150,0.5); }
 }
 .cy-container.blast-active { cursor: crosshair; }
 
-/* Domain zones overlaid on the graph (positioned from node bounds in JS).
-   pointer-events:none so node clicks pass straight through. */
-.graph-zone {
-  position: absolute; pointer-events: none; z-index: 4;
-  border-radius: 16px; border: 1.5px dashed transparent;
-  transition: all 0.18s ease;
+/* Domain zones (GitHub vs Cloud/Production) are rendered as real Cytoscape
+   compound parent nodes on the canvas itself — styled in getCytoscapeStylesheet
+   via the node[zone] selectors — so no DOM overlay rules are needed here. */
+
+/* Entry-points legend: shown only while the spotlight toggle is on. */
+.graph-entry-legend {
+  position: absolute; top: 12px; left: 12px; z-index: 5;
+  display: flex; flex-direction: column; gap: 5px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; font-size: 11px; box-shadow: 0 4px 16px rgba(15,23,42,0.12);
 }
-.graph-zone-label {
-  position: absolute; top: -11px; left: 14px;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
-}
-.zone-github { background: rgba(71, 85, 105, 0.06); border-color: rgba(71, 85, 105, 0.40); }
-.zone-github .graph-zone-label { background: #475569; color: #fff; }
-.zone-cloud  { background: rgba(220, 38, 38, 0.06); border-color: rgba(220, 38, 38, 0.45); }
-.zone-cloud  .graph-zone-label { background: #b91c1c; color: #fff; }
+.graph-entry-legend .gel-title { font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; color: var(--text-muted); }
+.graph-entry-legend .gel-item { display: flex; align-items: center; gap: 7px; }
+.graph-entry-legend .gel-dot { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+.gel-supplychain { background: #f59e0b; }
+.gel-identity    { background: #6366f1; }
+.gel-trigger     { background: #64748b; }
+.btn.btn-sm.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .graph-info-panel {
   width: 340px; flex-shrink: 0;
@@ -1737,6 +1739,17 @@ tr.diff-new td:first-child { border-left: 2px solid rgba(0,227,150,0.5); }
 }
 .findings-empty { font-size: 12.5px; color: var(--text-dim); padding: 8px 0; }
 .findings-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* Pager for the (now long) attack-paths / action-items lists. */
+.findings-pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 12px 0 4px; }
+.findings-page-btn {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 12px; font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.findings-page-btn:hover:not(:disabled) { background: var(--accent-bg); border-color: var(--accent); }
+.findings-page-btn:disabled { opacity: 0.4; cursor: default; }
+.findings-page-info { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 .finding-row {
   background: var(--bg-card);
