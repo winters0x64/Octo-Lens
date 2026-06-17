@@ -3,10 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in — PAT Monitor</title>
+  <title>Sign in — Octo Lens</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    (function () { try { var t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
+  </script>
   <style>
     :root {
       --bg:          #f1f5f9;
@@ -23,6 +26,21 @@
       --danger:      #dc2626;
       --danger-bg:   rgba(220, 38, 38, 0.08);
       --radius:      6px;
+    }
+    :root[data-theme="dark"] {
+      --bg:          #0b0e14;
+      --bg-card:     #161b25;
+      --bg-elevated: #1c2230;
+      --border:      #242c3a;
+      --border-light:#333e50;
+      --text:        #e7eaf0;
+      --text-secondary: #aab3c2;
+      --text-muted:  #828da0;
+      --accent:      #3b82f6;
+      --accent-hover:#60a5fa;
+      --accent-glow: rgba(59, 130, 246, 0.30);
+      --danger:      #ef4444;
+      --danger-bg:   rgba(239, 68, 68, 0.16);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -122,7 +140,7 @@
       padding: 0 14px;
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      background: #f8fafc;
+      background: var(--bg-elevated);
       color: var(--text);
       font-size: 14px;
       font-family: inherit;
@@ -138,7 +156,7 @@
 
     input[readonly] {
       color: var(--text-muted);
-      background: #f1f5f9;
+      background: var(--bg);
       cursor: default;
     }
 
@@ -230,8 +248,7 @@
           <path d="M16 8V24M8 12L24 20M24 12L8 20" stroke="#2D7FF9" stroke-width="1.5" opacity="0.4"/>
         </svg>
         <div class="login-logo-text">
-          <span class="app-name">PAT Monitor</span>
-          <span class="app-sub">GitHub Credential Governance</span>
+          <span class="app-name">Octo Lens</span>
         </div>
       </div>
 
@@ -274,7 +291,7 @@
       </form>
 
     </div>
-    <div class="login-footer">PAT Monitor · Scapia Security</div>
+    <div class="login-footer">Octo Lens</div>
   </div>
 
   <script>

@@ -1,4 +1,4 @@
-# GitHub PAT Monitor
+# Octo Lens
 
 Centralized visibility into **fine-grained Personal Access Tokens (PATs)** and **installed GitHub Apps** across your GitHub organization. Provides both a CLI and a web dashboard.
 

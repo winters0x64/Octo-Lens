@@ -1,0 +1,15 @@
+# Secrets / local config — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.pem.*
+*.key
+
+# Build artifacts
+/github-pat-monitor
+/dist/
+*.out
+
+# OS / editor
+.DS_Store

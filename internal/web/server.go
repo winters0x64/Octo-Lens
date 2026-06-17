@@ -21,6 +21,7 @@ import (
 	"time"
 
 	ghservice "github.com/th3-j0ik3r/github-pat-monitor/internal/github"
+	"github.com/th3-j0ik3r/github-pat-monitor/internal/graph"
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/models"
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/notify"
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/persist"
@@ -53,6 +54,11 @@ type Server struct {
 	prevAppsComplete    bool
 	prevSecretsComplete bool
 	prevDKsComplete     bool
+
+	// Reachability graph, memoized per scan (keyed by report.ScannedAt).
+	graphMu      sync.Mutex
+	graphCache   *graph.Graph
+	graphCacheTS time.Time
 }
 
 type Config struct {
@@ -429,6 +435,12 @@ func (s *Server) ListenAndServe(cfg Config) error {
 	mux.HandleFunc("DELETE /api/deploy-keys/{id}", s.handleDeleteDeployKey)
 	mux.HandleFunc("GET /api/workflow-permissions", s.handleWorkflowPerms)
 	mux.HandleFunc("GET /api/workflow-files", s.handleWorkflowFiles)
+	mux.HandleFunc("GET /api/attack-graph", s.handleAttackGraph)
+	mux.HandleFunc("GET /api/attack-graph/nodes", s.handleAttackGraphNodes)
+	mux.HandleFunc("GET /api/attack-graph/analytics", s.handleAttackAnalytics)
+	mux.HandleFunc("GET /api/attack-graph/findings", s.handleAttackFindings)
+	mux.HandleFunc("GET /api/actions-inventory", s.handleActionsInventory)
+	mux.HandleFunc("GET /api/blast-radius", s.handleBlastRadius)
 	mux.HandleFunc("POST /api/pats/requests/{id}/review", s.handleReviewPATRequest)
 	mux.HandleFunc("POST /api/pats/{id}/revoke", s.handleRevokePAT)
 	mux.HandleFunc("POST /api/apps/{id}/suspend", s.handleSuspendApp)
@@ -481,9 +493,10 @@ func (s *Server) ListenAndServe(cfg Config) error {
 				len(cached.PATs), len(cached.Apps), len(cached.Secrets), len(cached.DeployKeys))
 			go s.runScan(ctx)
 		} else {
-			// First run (empty DB) — block until scan completes so the dashboard has data.
-			log.Printf("No cached data found, running initial scan...")
-			s.runScan(context.Background())
+			// First run (empty DB) — scan in the background so the dashboard is
+			// reachable immediately; API endpoints return 503 until data lands.
+			log.Printf("No cached data found, running initial scan in background...")
+			go s.runScan(ctx)
 		}
 	} else {
 		// No Postgres — blocking scan.

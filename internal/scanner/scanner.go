@@ -38,6 +38,7 @@ type Result struct {
 	DeployKeysComplete   bool
 	WorkflowPermsComplete bool
 	WorkflowFilesComplete bool
+	ZizmorComplete        bool
 
 	// PhaseErrors collects per-phase failures without aborting the scan.
 	PhaseErrors []error
@@ -180,14 +181,32 @@ func (s *Scanner) Scan(ctx context.Context) (*Result, error) {
 
 		go func() {
 			defer wg2.Done()
-			var err error
-			workflowFiles, err = s.gh.AuditWorkflowFiles(ctx, repos)
+			files, contents, err := s.gh.AuditWorkflowFiles(ctx, repos)
+			workflowFiles = files
 			if err != nil {
 				log.Printf("WARNING: workflow audit partial failure: %v", err)
 				addErr("workflow_files", err)
 				return
 			}
 			res.WorkflowFilesComplete = true
+
+			// Run zizmor (offline SAST) over the fetched YAMLs and attach
+			// findings to each workflow file. Non-fatal: a zizmor failure or a
+			// missing binary leaves the heuristic audit intact.
+			findings, zerr := RunZizmor(ctx, contents)
+			if zerr != nil {
+				log.Printf("WARNING: zizmor scan failed: %v", zerr)
+				addErr("zizmor", zerr)
+				return
+			}
+			if len(findings) > 0 {
+				for i := range workflowFiles {
+					if fs := findings[workflowFiles[i].RepoName+"|"+workflowFiles[i].Path]; len(fs) > 0 {
+						workflowFiles[i].ZizmorFindings = fs
+					}
+				}
+			}
+			res.ZizmorComplete = true
 		}()
 
 		wg2.Wait()

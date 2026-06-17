@@ -106,15 +106,51 @@ type WorkflowPermission struct {
 	Risk                       RiskLevel `json:"risk"`
 }
 
-// WorkflowFile represents a parsed workflow YAML with permission findings.
+// ActionRef is a single `uses:` reference extracted from a workflow, with its
+// pinning status. Kind distinguishes marketplace actions from reusable
+// workflows, container actions, and local actions.
+type ActionRef struct {
+	Raw    string `json:"raw"`              // original ref, e.g. "actions/checkout@v4"
+	Owner  string `json:"owner"`            // "actions" (empty for local/docker)
+	Name   string `json:"name"`             // "checkout" (repo or repo/path for reusable)
+	Ref    string `json:"ref"`              // tag/branch/SHA after @
+	SHA    string `json:"sha,omitempty"`    // set when Ref is a 40-char commit SHA
+	Pinned bool   `json:"pinned"`           // true when pinned to a full commit SHA
+	Kind   string `json:"kind"`             // "marketplace" | "reusable_workflow" | "docker" | "local"
+}
+
+// WorkflowFile represents a parsed workflow YAML with permission findings and
+// the structured supply-chain facts needed for blast-radius analysis.
 type WorkflowFile struct {
 	RepoName        string    `json:"repo_name"`
 	FileName        string    `json:"file_name"`
 	Path            string    `json:"path"`
 	Permissions     string    `json:"permissions"`      // raw permissions string or "write-all", "read-all", "not set"
 	HasPinnedActions bool     `json:"has_pinned_actions"`
-	UnpinnedActions  []string `json:"unpinned_actions"`
+	UnpinnedActions  []string `json:"unpinned_actions"` // retained for back-compat (derived from Actions)
 	Risk            RiskLevel `json:"risk"`
+
+	// Structured extraction (blast-radius graph inputs).
+	Actions      []ActionRef `json:"actions,omitempty"`        // every uses: ref, pinned and unpinned
+	SecretRefs   []string    `json:"secret_refs,omitempty"`    // ${{ secrets.NAME }} names; "*" = dynamic/all
+	Environments []string    `json:"environments,omitempty"`   // job-level environment: values
+	OIDCRoles    []string    `json:"oidc_roles,omitempty"`     // cloud role ARNs / WIF providers requested
+	Triggers     []string    `json:"triggers,omitempty"`       // on: event keys
+	IDTokenWrite bool        `json:"id_token_write"`           // OIDC: id-token: write present
+	SelfHosted   bool        `json:"self_hosted"`              // any runs-on: self-hosted
+
+	// External SAST findings from zizmor (offline audit).
+	ZizmorFindings []ZizmorFinding `json:"zizmor_findings,omitempty"`
+}
+
+// ZizmorFinding is a single static-analysis finding from zizmor for a workflow.
+type ZizmorFinding struct {
+	RuleID     string `json:"rule_id"`    // zizmor "ident", e.g. "template-injection"
+	Desc       string `json:"desc"`
+	URL        string `json:"url"`        // link to the audit's documentation
+	Severity   string `json:"severity"`   // informational | low | medium | high (lowercased)
+	Confidence string `json:"confidence"` // low | medium | high (lowercased)
+	Line       int    `json:"line"`       // 1-based line in the workflow (zizmor reports 0-based)
 }
 
 type OrgSummary struct {
