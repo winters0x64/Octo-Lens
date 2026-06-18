@@ -12,7 +12,7 @@ import (
 )
 
 // fakeDeployKeys returns hardcoded fake deploy keys for local UI development.
-// Activated by SEED_FAKE_SSO=true. Never used in production.
+// Activated by SEED_FAKE_DK=true. Never used in production.
 func fakeDeployKeys() []models.DeployKey {
 	now := time.Now()
 	ptr := func(t time.Time) *time.Time { return &t }
@@ -20,37 +20,37 @@ func fakeDeployKeys() []models.DeployKey {
 	return []models.DeployKey{
 		// Read-write keys (high risk) — CI/CD machines
 		{
-			ID: 3001, Title: "prod-deploy-jenkins", RepoName: "scapia-backend",
-			ReadOnly: false, AddedBy: "madhukar-scapia",
+			ID: 3001, Title: "prod-deploy-jenkins", RepoName: "backend-api",
+			ReadOnly: false, AddedBy: "alex-chen",
 			CreatedAt: now.AddDate(-1, -2, 0),
 			LastUsed:  ptr(now.AddDate(0, 0, -1)),
 			Risk:      models.RiskHigh,
 		},
 		{
-			ID: 3002, Title: "github-actions-deploy", RepoName: "scapia-frontend",
-			ReadOnly: false, AddedBy: "laksh-scapia",
+			ID: 3002, Title: "github-actions-deploy", RepoName: "frontend-web",
+			ReadOnly: false, AddedBy: "riley-kim",
 			CreatedAt: now.AddDate(0, -8, 0),
 			LastUsed:  ptr(now.AddDate(0, 0, -3)),
 			Risk:      models.RiskHigh,
 		},
 		{
 			ID: 3003, Title: "aws-ec2-cicd", RepoName: "infra-terraform",
-			ReadOnly: false, AddedBy: "aravind24k",
+			ReadOnly: false, AddedBy: "sam-patel",
 			CreatedAt: now.AddDate(-1, 0, 0),
 			LastUsed:  ptr(now.AddDate(0, 0, -7)),
 			Risk:      models.RiskHigh,
 		},
 		{
 			ID: 3004, Title: "buildkite-agent-prod", RepoName: "payments-service",
-			ReadOnly: false, AddedBy: "sumedh-scapia",
+			ReadOnly: false, AddedBy: "jamie-lee",
 			CreatedAt: now.AddDate(0, -5, 0),
 			LastUsed:  ptr(now.AddDate(0, 0, -2)),
 			Risk:      models.RiskHigh,
 		},
 		// Stale read-write — no longer used
 		{
-			ID: 3005, Title: "old-laptop-arun", RepoName: "scapia-backend",
-			ReadOnly: false, AddedBy: "arun-scapia",
+			ID: 3005, Title: "old-laptop-arun", RepoName: "backend-api",
+			ReadOnly: false, AddedBy: "charlie-harris",
 			CreatedAt: now.AddDate(-2, 0, 0),
 			LastUsed:  ptr(now.AddDate(-1, -3, 0)), // 15 months stale
 			Risk:      models.RiskHigh,
@@ -64,43 +64,43 @@ func fakeDeployKeys() []models.DeployKey {
 		},
 		// Read-only keys — monitoring, read CI
 		{
-			ID: 3007, Title: "grafana-source-sync", RepoName: "scapia-frontend",
-			ReadOnly: true, AddedBy: "madhukar-scapia",
+			ID: 3007, Title: "grafana-source-sync", RepoName: "frontend-web",
+			ReadOnly: true, AddedBy: "alex-chen",
 			CreatedAt: now.AddDate(0, -3, 0),
 			LastUsed:  ptr(now.AddDate(0, 0, -1)),
 			Risk:      models.RiskLow,
 		},
 		{
 			ID: 3008, Title: "read-only-ci-checker", RepoName: "payments-service",
-			ReadOnly: true, AddedBy: "anuragx7-dev",
+			ReadOnly: true, AddedBy: "taylor-nguyen",
 			CreatedAt: now.AddDate(0, -6, 0),
 			LastUsed:  ptr(now.AddDate(0, 0, -5)),
 			Risk:      models.RiskLow,
 		},
 		{
 			ID: 3009, Title: "sentry-release-tracker", RepoName: "card-service",
-			ReadOnly: true, AddedBy: "sumedh-scapia",
+			ReadOnly: true, AddedBy: "jamie-lee",
 			CreatedAt: now.AddDate(0, -4, -10),
 			LastUsed:  ptr(now.AddDate(0, 0, -2)),
 			Risk:      models.RiskLow,
 		},
 		{
 			ID: 3010, Title: "datadog-apm-sync", RepoName: "infra-terraform",
-			ReadOnly: true, AddedBy: "aravind24k",
+			ReadOnly: true, AddedBy: "sam-patel",
 			CreatedAt: now.AddDate(-1, 0, 0),
 			LastUsed:  ptr(now.AddDate(0, -7, 0)), // stale read-only
 			Risk:      models.RiskLow,
 		},
 		// Unknown origin — no added_by
 		{
-			ID: 3011, Title: "deploy-key-1", RepoName: "scapia-backend",
+			ID: 3011, Title: "deploy-key-1", RepoName: "backend-api",
 			ReadOnly: false, AddedBy: "",
 			CreatedAt: now.AddDate(0, -10, 0),
 			LastUsed:  ptr(now.AddDate(0, -2, 0)),
 			Risk:      models.RiskHigh,
 		},
 		{
-			ID: 3012, Title: "ssh-key-prod", RepoName: "notification-service",
+			ID: 3012, Title: "ssh-key-prod", RepoName: "messaging-service",
 			ReadOnly: false, AddedBy: "",
 			CreatedAt: now.AddDate(-1, -1, 0),
 			LastUsed:  ptr(now.AddDate(0, 0, -14)),
@@ -111,7 +111,7 @@ func fakeDeployKeys() []models.DeployKey {
 
 // DeleteDeployKey removes a deploy key from a repository.
 func (s *GitHubService) DeleteDeployKey(ctx context.Context, repoName string, keyID int64) error {
-	if os.Getenv("SEED_FAKE_SSO") == "true" {
+	if os.Getenv("SEED_FAKE_DK") == "true" {
 		return nil
 	}
 	_, err := s.client.Repositories.DeleteKey(ctx, s.org, repoName, keyID)
@@ -123,7 +123,7 @@ func (s *GitHubService) DeleteDeployKey(ctx context.Context, repoName string, ke
 
 // ListAllDeployKeys enumerates deploy keys across all repositories.
 func (s *GitHubService) ListAllDeployKeys(ctx context.Context, repos []*gh.Repository) ([]models.DeployKey, error) {
-	if os.Getenv("SEED_FAKE_SSO") == "true" {
+	if os.Getenv("SEED_FAKE_DK") == "true" {
 		return fakeDeployKeys(), nil
 	}
 	var allKeys []models.DeployKey

@@ -18,14 +18,14 @@ import (
 func fakeWorkflowPermissions() []models.WorkflowPermission {
 	return []models.WorkflowPermission{
 		// write + can approve PRs — worst case
-		{RepoName: "scapia-backend",       DefaultPermission: "write", CanApprovePRs: true,  Risk: models.RiskHigh},
+		{RepoName: "backend-api",       DefaultPermission: "write", CanApprovePRs: true,  Risk: models.RiskHigh},
 		{RepoName: "payments-service",     DefaultPermission: "write", CanApprovePRs: true,  Risk: models.RiskHigh},
 		// write, no PR approval
 		{RepoName: "infra-terraform",      DefaultPermission: "write", CanApprovePRs: false, Risk: models.RiskHigh},
 		{RepoName: "card-service",         DefaultPermission: "write", CanApprovePRs: false, Risk: models.RiskHigh},
-		{RepoName: "notification-service", DefaultPermission: "write", CanApprovePRs: false, Risk: models.RiskHigh},
+		{RepoName: "messaging-service", DefaultPermission: "write", CanApprovePRs: false, Risk: models.RiskHigh},
 		// read + can approve PRs — medium
-		{RepoName: "scapia-frontend",      DefaultPermission: "read",  CanApprovePRs: true,  Risk: models.RiskMedium},
+		{RepoName: "frontend-web",      DefaultPermission: "read",  CanApprovePRs: true,  Risk: models.RiskMedium},
 		{RepoName: "analytics-service",    DefaultPermission: "read",  CanApprovePRs: true,  Risk: models.RiskMedium},
 		// read, no PR approval — clean
 		{RepoName: "docs-internal",        DefaultPermission: "read",  CanApprovePRs: false, Risk: models.RiskLow},
@@ -39,7 +39,7 @@ func fakeWorkflowFiles() []models.WorkflowFile {
 	return []models.WorkflowFile{
 		// write-all + unpinned + OIDC to prod — critical, large blast radius
 		{
-			RepoName: "scapia-backend", FileName: "deploy.yml",
+			RepoName: "backend-api", FileName: "deploy.yml",
 			Path: ".github/workflows/deploy.yml", Permissions: "write-all",
 			HasPinnedActions: false,
 			UnpinnedActions:  []string{"actions/checkout@v4", "actions/setup-node@v3", "aws-actions/amazon-ecr-login@v2"},
@@ -87,7 +87,7 @@ func fakeWorkflowFiles() []models.WorkflowFile {
 			Risk: models.RiskHigh,
 		},
 		{
-			RepoName: "notification-service", FileName: "test.yml",
+			RepoName: "messaging-service", FileName: "test.yml",
 			Path: ".github/workflows/test.yml", Permissions: "not set",
 			HasPinnedActions: false,
 			UnpinnedActions:  []string{"actions/checkout@v4", "actions/setup-go@v4"},
@@ -95,7 +95,7 @@ func fakeWorkflowFiles() []models.WorkflowFile {
 		},
 		// read-all + unpinned — medium
 		{
-			RepoName: "scapia-frontend", FileName: "lint.yml",
+			RepoName: "frontend-web", FileName: "lint.yml",
 			Path: ".github/workflows/lint.yml", Permissions: "read-all",
 			HasPinnedActions: false,
 			UnpinnedActions:  []string{"actions/checkout@v4", "actions/setup-node@v3"},
@@ -128,7 +128,7 @@ func fakeWorkflowFiles() []models.WorkflowFile {
 
 // ListWorkflowPermissions fetches the default GITHUB_TOKEN permissions for each repo.
 func (s *GitHubService) ListWorkflowPermissions(ctx context.Context, repos []*gh.Repository) ([]models.WorkflowPermission, error) {
-	if os.Getenv("SEED_FAKE_SSO") == "true" {
+	if os.Getenv("SEED_FAKE_WF") == "true" {
 		return fakeWorkflowPermissions(), nil
 	}
 	var all []models.WorkflowPermission
@@ -178,7 +178,7 @@ type WorkflowContent struct {
 // pinning issues, and returns the raw decoded YAML of each file alongside the
 // findings so callers can run additional analysis (e.g. zizmor).
 func (s *GitHubService) AuditWorkflowFiles(ctx context.Context, repos []*gh.Repository) ([]models.WorkflowFile, []WorkflowContent, error) {
-	if os.Getenv("SEED_FAKE_SSO") == "true" {
+	if os.Getenv("SEED_FAKE_WF") == "true" {
 		return fakeWorkflowFiles(), nil, nil
 	}
 	var all []models.WorkflowFile

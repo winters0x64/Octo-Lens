@@ -3,6 +3,8 @@ package github
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/http"
 	"time"
 
 	gh "github.com/google/go-github/v68/github"
@@ -76,8 +78,12 @@ func (s *GitHubService) FetchSecretCreators(ctx context.Context) (map[string]str
 			SecretName    string `json:"secret_name"`
 			Name          string `json:"name"`
 		}
-		if _, err := s.client.Do(ctx, req, &raw); err != nil {
-			return creators, nil // non-fatal: audit log not on non-Enterprise orgs
+		if resp, err := s.client.Do(ctx, req, &raw); err != nil {
+			if resp != nil && resp.StatusCode == http.StatusNotFound {
+				log.Printf("INFO: audit log unavailable for org %q (requires GitHub Enterprise Cloud) — Created By column will be empty", s.org)
+				return creators, nil
+			}
+			return creators, nil // non-fatal
 		}
 
 		for _, e := range raw {
