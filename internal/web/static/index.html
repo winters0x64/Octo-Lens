@@ -197,6 +197,15 @@
               <button class="filter-chip" data-type="SSH key">SSH Key</button>
             </div>
           </div>
+          <div class="chip-row">
+            <span class="chip-row-label">Expires</span>
+            <div class="filter-group" id="sso-expiry-filter">
+              <button class="filter-chip active" data-expiry="">All</button>
+              <button class="filter-chip" data-expiry="never">Never</button>
+              <button class="filter-chip" data-expiry="soon">Expiring soon</button>
+              <button class="filter-chip" data-expiry="has">Has expiry</button>
+            </div>
+          </div>
           <div class="table-wrap"><table id="sso-table"><tbody></tbody></table></div>
           <div class="pagination" id="sso-pagination"></div>
         </div>
@@ -368,12 +377,23 @@
         <div class="tab-content" id="tab-metric-drill">
           <button class="btn btn-sm wf-back-btn" id="metric-drill-back">&larr; Back</button>
           <div class="section-header"><h2 id="metric-drill-title"></h2></div>
-          <div class="chip-row" id="drill-sso-type-filter" style="display:none">
-            <span class="chip-row-label">Type</span>
-            <div class="filter-group" id="drill-sso-type-chips">
-              <button class="filter-chip active" data-type="">All</button>
-              <button class="filter-chip" data-type="personal access token">PAT</button>
-              <button class="filter-chip" data-type="SSH key">SSH Key</button>
+          <div id="drill-sso-filters" style="display:none">
+            <div class="chip-row">
+              <span class="chip-row-label">Type</span>
+              <div class="filter-group" id="drill-sso-type-chips">
+                <button class="filter-chip active" data-type="">All</button>
+                <button class="filter-chip" data-type="personal access token">PAT</button>
+                <button class="filter-chip" data-type="SSH key">SSH Key</button>
+              </div>
+            </div>
+            <div class="chip-row">
+              <span class="chip-row-label">Expires</span>
+              <div class="filter-group" id="drill-sso-expiry-chips">
+                <button class="filter-chip active" data-expiry="">All</button>
+                <button class="filter-chip" data-expiry="never">Never</button>
+                <button class="filter-chip" data-expiry="soon">Expiring soon</button>
+                <button class="filter-chip" data-expiry="has">Has expiry</button>
+              </div>
             </div>
           </div>
           <div class="table-wrap"><table id="metric-drill-table"></table></div>

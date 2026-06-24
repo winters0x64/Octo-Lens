@@ -25,7 +25,9 @@
   var wpPage = 1;
   var WP_PAGE_SIZE = 15; // GITHUB_TOKEN permissions paginate 15 per page
   var ssoTypeFilter = '';   // '' = all, 'personal access token', 'ssh key'
+  var ssoExpiryFilter = ''; // '' = all, 'never', 'soon', 'has'
   var drillSsoTypeFilter = ''; // type filter applied inside metric-drill when tab=sso
+  var drillSsoExpiryFilter = ''; // expiry filter applied inside metric-drill when tab=sso
   var actionsTrustFilter = ''; // '' = all, 'first_party', 'verified', 'third_party'
   var secretScopeFilter = ''; // '' = all, 'org', 'repo', 'environment'
   var patsView = 'pats';      // 'pats' | 'requests'
@@ -1653,14 +1655,18 @@
     document.getElementById('tab-metric-drill').classList.add('active');
     document.getElementById('metric-drill-title').textContent = d.title + ' (' + d.rows.length + ')';
     document.getElementById('page-title').textContent = d.title;
-    // Show SSO type filter only for SSO drill-downs
-    var ssoFilter = document.getElementById('drill-sso-type-filter');
-    if (ssoFilter) {
-      ssoFilter.style.display = d.tab === 'sso' ? '' : 'none';
+    // Show SSO filters only for SSO drill-downs
+    var ssoFilters = document.getElementById('drill-sso-filters');
+    if (ssoFilters) {
+      ssoFilters.style.display = d.tab === 'sso' ? '' : 'none';
       if (d.tab !== 'sso') {
         drillSsoTypeFilter = '';
+        drillSsoExpiryFilter = '';
         document.querySelectorAll('#drill-sso-type-chips .filter-chip').forEach(function(b) {
           b.classList.toggle('active', b.dataset.type === '');
+        });
+        document.querySelectorAll('#drill-sso-expiry-chips .filter-chip').forEach(function(b) {
+          b.classList.toggle('active', b.dataset.expiry === '');
         });
       }
     }
@@ -1683,10 +1689,13 @@
     var table = document.getElementById('metric-drill-table');
     var pager = document.getElementById('metric-drill-pagination');
     if (!table) return;
-    // Apply SSO type filter within drill-down
+    // Apply SSO type + expiry filters within drill-down
     var rows = d.rows;
-    if (d.tab === 'sso' && drillSsoTypeFilter) {
-      rows = rows.filter(function(r) { return r.credential_type === drillSsoTypeFilter; });
+    if (d.tab === 'sso') {
+      if (drillSsoTypeFilter) {
+        rows = rows.filter(function(r) { return r.credential_type === drillSsoTypeFilter; });
+      }
+      rows = applySsoExpiryFilter(rows, drillSsoExpiryFilter);
     }
     if (!rows.length) {
       table.innerHTML = '<tbody><tr><td class="empty-cell">No items match the filter.</td></tr></tbody>';
@@ -1906,13 +1915,27 @@
 
   // --- SSO Credentials ---
 
+  function applySsoExpiryFilter(creds, expiryFilter) {
+    if (!expiryFilter) return creds;
+    var now = Date.now();
+    var soon = now + 30 * 24 * 60 * 60 * 1000;
+    return creds.filter(function(c) {
+      var exp = c.authorized_credential_expires_at;
+      if (expiryFilter === 'never') return !exp;
+      if (expiryFilter === 'has')   return !!exp;
+      if (expiryFilter === 'soon')  return exp && new Date(exp).getTime() <= soon;
+      return true;
+    });
+  }
+
   function renderSSOCredentials(creds) {
     if (!creds) creds = [];
 
-    // Apply type filter
+    // Apply type then expiry filters
     var filtered = ssoTypeFilter
       ? creds.filter(function(c) { return c.credential_type === ssoTypeFilter; })
       : creds;
+    filtered = applySsoExpiryFilter(filtered, ssoExpiryFilter);
 
     var sorted = sortData(filtered, ssoSort);
     var table = document.getElementById('sso-table');
@@ -2916,12 +2939,34 @@
     });
   });
 
+  // SSO expiry filter chips (main SSO tab)
+  document.querySelectorAll('#sso-expiry-filter .filter-chip').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#sso-expiry-filter .filter-chip').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      ssoExpiryFilter = btn.dataset.expiry;
+      ssoPage = 1;
+      if (report) renderSSOCredentials(report.sso_credentials);
+    });
+  });
+
   // SSO type filter chips inside the drill-down view
   document.querySelectorAll('#drill-sso-type-chips .filter-chip').forEach(function(btn) {
     btn.addEventListener('click', function() {
       document.querySelectorAll('#drill-sso-type-chips .filter-chip').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
       drillSsoTypeFilter = btn.dataset.type;
+      drillPage = 1;
+      renderDrillTable();
+    });
+  });
+
+  // SSO expiry filter chips inside the drill-down view
+  document.querySelectorAll('#drill-sso-expiry-chips .filter-chip').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#drill-sso-expiry-chips .filter-chip').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      drillSsoExpiryFilter = btn.dataset.expiry;
       drillPage = 1;
       renderDrillTable();
     });
