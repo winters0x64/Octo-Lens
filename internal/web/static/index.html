@@ -263,6 +263,15 @@
               <h2>GitHub Actions BOM</h2>
               <input type="text" class="filter-input" id="actions-inventory-filter" placeholder="Search actions…">
             </div>
+            <div class="chip-row">
+              <span class="chip-row-label">Trust</span>
+              <div class="filter-group" id="actions-trust-filter">
+                <button class="filter-chip active" data-trust="">All</button>
+                <button class="filter-chip" data-trust="first_party">First-party</button>
+                <button class="filter-chip" data-trust="verified">Verified</button>
+                <button class="filter-chip" data-trust="third_party">Third-party</button>
+              </div>
+            </div>
             <div class="zizmor-summary" id="actions-inventory-summary"></div>
             <div class="table-wrap"><table id="actions-inventory-table"><tbody></tbody></table></div>
             <div class="pagination" id="actions-inventory-pagination"></div>
@@ -359,6 +368,14 @@
         <div class="tab-content" id="tab-metric-drill">
           <button class="btn btn-sm wf-back-btn" id="metric-drill-back">&larr; Back</button>
           <div class="section-header"><h2 id="metric-drill-title"></h2></div>
+          <div class="chip-row" id="drill-sso-type-filter" style="display:none">
+            <span class="chip-row-label">Type</span>
+            <div class="filter-group" id="drill-sso-type-chips">
+              <button class="filter-chip active" data-type="">All</button>
+              <button class="filter-chip" data-type="personal access token">PAT</button>
+              <button class="filter-chip" data-type="SSH key">SSH Key</button>
+            </div>
+          </div>
           <div class="table-wrap"><table id="metric-drill-table"></table></div>
           <div class="pagination" id="metric-drill-pagination"></div>
         </div>

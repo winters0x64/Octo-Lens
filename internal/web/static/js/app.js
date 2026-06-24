@@ -25,6 +25,8 @@
   var wpPage = 1;
   var WP_PAGE_SIZE = 15; // GITHUB_TOKEN permissions paginate 15 per page
   var ssoTypeFilter = '';   // '' = all, 'personal access token', 'ssh key'
+  var drillSsoTypeFilter = ''; // type filter applied inside metric-drill when tab=sso
+  var actionsTrustFilter = ''; // '' = all, 'first_party', 'verified', 'third_party'
   var secretScopeFilter = ''; // '' = all, 'org', 'repo', 'environment'
   var patsView = 'pats';      // 'pats' | 'requests'
   let secretSort = { col: 'risk', asc: false };
@@ -1651,6 +1653,17 @@
     document.getElementById('tab-metric-drill').classList.add('active');
     document.getElementById('metric-drill-title').textContent = d.title + ' (' + d.rows.length + ')';
     document.getElementById('page-title').textContent = d.title;
+    // Show SSO type filter only for SSO drill-downs
+    var ssoFilter = document.getElementById('drill-sso-type-filter');
+    if (ssoFilter) {
+      ssoFilter.style.display = d.tab === 'sso' ? '' : 'none';
+      if (d.tab !== 'sso') {
+        drillSsoTypeFilter = '';
+        document.querySelectorAll('#drill-sso-type-chips .filter-chip').forEach(function(b) {
+          b.classList.toggle('active', b.dataset.type === '');
+        });
+      }
+    }
     renderDrillTable();
     var content = document.querySelector('.content');
     if (content) content.scrollTop = 0;
@@ -1670,15 +1683,20 @@
     var table = document.getElementById('metric-drill-table');
     var pager = document.getElementById('metric-drill-pagination');
     if (!table) return;
-    if (!d.rows.length) {
-      table.innerHTML = '<tbody><tr><td class="empty-cell">No items.</td></tr></tbody>';
+    // Apply SSO type filter within drill-down
+    var rows = d.rows;
+    if (d.tab === 'sso' && drillSsoTypeFilter) {
+      rows = rows.filter(function(r) { return r.credential_type === drillSsoTypeFilter; });
+    }
+    if (!rows.length) {
+      table.innerHTML = '<tbody><tr><td class="empty-cell">No items match the filter.</td></tr></tbody>';
       if (pager) pager.innerHTML = '';
       return;
     }
-    var totalPages = Math.max(1, Math.ceil(d.rows.length / 15));
+    var totalPages = Math.max(1, Math.ceil(rows.length / 15));
     if (drillPage > totalPages) drillPage = totalPages;
     if (drillPage < 1) drillPage = 1;
-    var pageRows = d.rows.slice((drillPage - 1) * 15, drillPage * 15);
+    var pageRows = rows.slice((drillPage - 1) * 15, drillPage * 15);
     table.innerHTML =
       '<thead><tr>' + cols.map(function(c) { return '<th>' + gEsc(c.h) + '</th>'; }).join('') + '</tr></thead>' +
       '<tbody>' + pageRows.map(function(it) {
@@ -1694,7 +1712,7 @@
         return function() { rowFn(item); };
       })(pageRows[i]));
     });
-    buildPagination('metric-drill-pagination', d.rows.length, drillPage, function(p) { drillPage = p; renderDrillTable(); }, 15);
+    buildPagination('metric-drill-pagination', rows.length, drillPage, function(p) { drillPage = p; renderDrillTable(); }, 15);
   }
 
   function closeMetricDrill() {
@@ -2464,6 +2482,10 @@
     items = items || [];
     showActionListView();
     renderActionsInventorySummary(actionsInventoryData);
+    // Apply trust filter
+    if (actionsTrustFilter) {
+      items = items.filter(function(it) { return it.trust === actionsTrustFilter; });
+    }
     var table = document.getElementById('actions-inventory-table');
     if (!table) return;
     table.innerHTML = '';
@@ -2883,7 +2905,7 @@
     });
   }
 
-  // SSO type filter chips
+  // SSO type filter chips (main SSO tab)
   document.querySelectorAll('#sso-type-filter .filter-chip').forEach(function(btn) {
     btn.addEventListener('click', function() {
       document.querySelectorAll('#sso-type-filter .filter-chip').forEach(function(b) { b.classList.remove('active'); });
@@ -2891,6 +2913,28 @@
       ssoTypeFilter = btn.dataset.type;
       ssoPage = 1;
       if (report) renderSSOCredentials(report.sso_credentials);
+    });
+  });
+
+  // SSO type filter chips inside the drill-down view
+  document.querySelectorAll('#drill-sso-type-chips .filter-chip').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#drill-sso-type-chips .filter-chip').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      drillSsoTypeFilter = btn.dataset.type;
+      drillPage = 1;
+      renderDrillTable();
+    });
+  });
+
+  // Actions BOM trust filter chips
+  document.querySelectorAll('#actions-trust-filter .filter-chip').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#actions-trust-filter .filter-chip').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      actionsTrustFilter = btn.dataset.trust;
+      actionsInvPage = 1;
+      renderActionsInventory(actionsInventoryData);
     });
   });
 
