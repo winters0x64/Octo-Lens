@@ -19,6 +19,14 @@ func newSessionStore() *sessionStore {
 	return &sessionStore{sessions: make(map[string]time.Time)}
 }
 
+func generateToken(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
 func (s *sessionStore) create() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

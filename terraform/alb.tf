@@ -47,7 +47,7 @@ resource "aws_lb_listener_rule" "app" {
 
   condition {
     host_header {
-      values = ["github-monitor.security.scapia.in"]
+      values = ["octolens.security.scapia.in"]
     }
   }
 

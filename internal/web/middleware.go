@@ -21,7 +21,10 @@ func SessionAuth(sessions *sessionStore, requireAuth bool) func(http.Handler) ht
 			// Paths that never require a session
 			if path == "/login" ||
 				path == "/health" ||
-				strings.HasPrefix(path, "/auth/") ||
+				path == "/auth/login" ||
+				path == "/auth/logout" ||
+				path == "/auth/google" ||
+				path == "/auth/google/callback" ||
 				strings.HasPrefix(path, "/css/") ||
 				strings.HasPrefix(path, "/js/") ||
 				path == "/webhooks/github" {

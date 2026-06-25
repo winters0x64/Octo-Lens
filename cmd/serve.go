@@ -26,6 +26,9 @@ var (
 	flagDatabaseURL        string
 	flagAutoMigrate        bool
 	flagEventRetentionDays int
+	flagGoogleClientID     string
+	flagGoogleClientSecret string
+	flagPublicURL          string
 )
 
 var serveCmd = &cobra.Command{
@@ -56,6 +59,15 @@ append-only event log capturing status flips and watched-field changes.`,
 		}
 		if flagDatabaseURL == "" {
 			flagDatabaseURL = os.Getenv("DATABASE_URL")
+		}
+		if flagGoogleClientID == "" {
+			flagGoogleClientID = os.Getenv("GOOGLE_CLIENT_ID")
+		}
+		if flagGoogleClientSecret == "" {
+			flagGoogleClientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
+		}
+		if flagPublicURL == "" {
+			flagPublicURL = os.Getenv("PUBLIC_URL")
 		}
 
 		var st *store.Store
@@ -89,16 +101,19 @@ append-only event log capturing status flips and watched-field changes.`,
 		srv := web.NewServer(ghService, sc, st, flagOrg, flagPassword)
 
 		return srv.ListenAndServe(web.Config{
-			Addr:          flagAddr,
-			Port:          flagPort,
-			Password:      flagPassword,
-			TLSCert:       flagTLSCert,
-			TLSKey:        flagTLSKey,
-			Org:           flagOrg,
-			ScanInterval:  flagScanInterval,
-			PolicyPath:    flagPolicyPath,
-			SlackWebhook:  flagSlackWebhook,
-			WebhookSecret: flagWebhookSecret,
+			Addr:               flagAddr,
+			Port:               flagPort,
+			Password:           flagPassword,
+			TLSCert:            flagTLSCert,
+			TLSKey:             flagTLSKey,
+			Org:                flagOrg,
+			ScanInterval:       flagScanInterval,
+			PolicyPath:         flagPolicyPath,
+			SlackWebhook:       flagSlackWebhook,
+			WebhookSecret:      flagWebhookSecret,
+			GoogleClientID:     flagGoogleClientID,
+			GoogleClientSecret: flagGoogleClientSecret,
+			PublicURL:          flagPublicURL,
 		})
 	},
 }
@@ -116,5 +131,8 @@ func init() {
 	serveCmd.Flags().StringVar(&flagDatabaseURL, "database-url", "", "Postgres connection string (env: DATABASE_URL). When unset, persistence is disabled.")
 	serveCmd.Flags().BoolVar(&flagAutoMigrate, "auto-migrate", true, "Apply embedded goose migrations on startup")
 	serveCmd.Flags().IntVar(&flagEventRetentionDays, "event-retention-days", 0, "Prune events older than N days (0 = keep forever)")
+	serveCmd.Flags().StringVar(&flagGoogleClientID, "google-client-id", "", "Google OAuth client ID (env: GOOGLE_CLIENT_ID)")
+	serveCmd.Flags().StringVar(&flagGoogleClientSecret, "google-client-secret", "", "Google OAuth client secret (env: GOOGLE_CLIENT_SECRET)")
+	serveCmd.Flags().StringVar(&flagPublicURL, "public-url", "", "Public base URL for OAuth redirect (env: PUBLIC_URL, e.g. https://octolens.security.scapia.in)")
 	rootCmd.AddCommand(serveCmd)
 }

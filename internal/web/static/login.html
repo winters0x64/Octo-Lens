@@ -6,41 +6,18 @@
   <title>Sign in — Octo Lens</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script>
-    (function () { try { var t = localStorage.getItem('theme'); if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
-  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg:          #f1f5f9;
       --bg-card:     #ffffff;
       --bg-elevated: #f8fafc;
       --border:      #e2e8f0;
-      --border-light:#cbd5e1;
       --text:        #0f172a;
       --text-secondary: #475569;
       --text-muted:  #64748b;
       --accent:      #2563eb;
-      --accent-hover:#1d4ed8;
-      --accent-glow: rgba(37, 99, 235, 0.15);
-      --danger:      #dc2626;
-      --danger-bg:   rgba(220, 38, 38, 0.08);
       --radius:      6px;
-    }
-    :root[data-theme="dark"] {
-      --bg:          #0b0e14;
-      --bg-card:     #161b25;
-      --bg-elevated: #1c2230;
-      --border:      #242c3a;
-      --border-light:#333e50;
-      --text:        #e7eaf0;
-      --text-secondary: #aab3c2;
-      --text-muted:  #828da0;
-      --accent:      #3b82f6;
-      --accent-hover:#60a5fa;
-      --accent-glow: rgba(59, 130, 246, 0.30);
-      --danger:      #ef4444;
-      --danger-bg:   rgba(239, 68, 68, 0.16);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -57,7 +34,6 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Subtle grid background */
     body::before {
       content: '';
       position: fixed;
@@ -97,14 +73,6 @@
       font-size: 14px;
       font-weight: 700;
       color: var(--text);
-      letter-spacing: -0.01em;
-    }
-
-    .login-logo-text .app-sub {
-      display: block;
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 1px;
     }
 
     h1 {
@@ -122,95 +90,69 @@
       line-height: 1.5;
     }
 
-    .field { margin-bottom: 18px; }
-
-    label {
-      display: block;
-      font-size: 12px;
+    .btn-google {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      width: 100%;
+      height: 46px;
+      padding: 0 20px;
+      background: #fff;
+      color: #3c4043;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
       font-weight: 500;
-      color: var(--text-secondary);
-      margin-bottom: 7px;
-      letter-spacing: 0.01em;
-    }
-
-    input {
-      display: block;
-      width: 100%;
-      height: 42px;
-      padding: 0 14px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--bg-elevated);
-      color: var(--text);
-      font-size: 14px;
-      font-family: inherit;
-      outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-    }
-
-    input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-glow);
-      background: rgba(45,127,249,0.04);
-    }
-
-    input[readonly] {
-      color: var(--text-muted);
-      background: var(--bg);
-      cursor: default;
-    }
-
-    input::placeholder { color: var(--text-muted); }
-
-    input[type="password"] {
-      font-family: 'JetBrains Mono', monospace;
-      letter-spacing: 0.05em;
-    }
-
-    .btn-login {
-      display: block;
-      width: 100%;
-      height: 42px;
-      margin-top: 28px;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: var(--radius);
-      font-size: 14px;
-      font-weight: 600;
       font-family: inherit;
       cursor: pointer;
-      transition: background 0.15s, box-shadow 0.15s, opacity 0.15s;
-      letter-spacing: 0.01em;
+      text-decoration: none;
+      transition: background 0.15s, box-shadow 0.15s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
 
-    .btn-login:hover {
-      background: var(--accent-hover);
-      box-shadow: 0 4px 20px rgba(45,127,249,0.4);
+    .btn-google:hover {
+      background: #f8f9fa;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     }
 
-    .btn-login:active { opacity: 0.9; }
-    .btn-login:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
-
-    .error-msg {
-      display: none;
-      align-items: center;
-      gap: 8px;
-      margin-top: 16px;
-      padding: 11px 14px;
-      background: var(--danger-bg);
-      border: 1px solid rgba(255,69,96,0.25);
-      border-radius: var(--radius);
-      font-size: 13px;
-      color: var(--danger);
+    .btn-google:active {
+      background: #f1f3f4;
     }
 
-    .error-msg.visible { display: flex; }
+    .google-icon {
+      flex-shrink: 0;
+    }
 
     .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 24px 0;
+    }
+
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
       height: 1px;
       background: var(--border);
-      margin: 28px 0;
+    }
+
+    .divider span {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .restricted-note {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+
+    .restricted-note strong {
+      color: var(--text-secondary);
     }
 
     .login-footer {
@@ -218,22 +160,6 @@
       margin-top: 24px;
       font-size: 11px;
       color: var(--text-muted);
-    }
-
-    .spinner {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      border: 2px solid rgba(255,255,255,0.5);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      margin-right: 8px;
-      vertical-align: middle;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
     }
   </style>
 </head>
@@ -253,88 +179,24 @@
       </div>
 
       <h1>Sign in</h1>
-      <p class="subtitle">Enter your credentials to access the dashboard.</p>
+      <p class="subtitle">Access the GitHub security dashboard.</p>
 
-      <form id="login-form" autocomplete="on" novalidate>
-        <div class="field">
-          <label for="username">Username</label>
-          <input
-            type="text"
-            id="username"
-            name="username"
-            value="admin"
-            readonly
-            autocomplete="username"
-          >
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input
-            type="password"
-            id="password"
-            name="password"
-            placeholder="Enter your password"
-            autocomplete="current-password"
-            required
-          >
-        </div>
+      <a href="/auth/google" class="btn-google">
+        <svg class="google-icon" width="18" height="18" viewBox="0 0 18 18">
+          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+          <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
+          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+        </svg>
+        Sign in with Google
+      </a>
 
-        <button type="submit" class="btn-login" id="submit-btn">Sign in</button>
-
-        <div class="error-msg" id="error-msg">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M8 2L2 13h12L8 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-            <path d="M8 7v3M8 11.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-          <span id="error-text">Invalid credentials</span>
-        </div>
-      </form>
+      <p class="restricted-note">
+        Restricted to <strong>@scapia.cards</strong> accounts only.
+      </p>
 
     </div>
-    <div class="login-footer">Octo Lens</div>
+    <div class="login-footer">Octo Lens &mdash; GitHub Security Dashboard</div>
   </div>
-
-  <script>
-    document.getElementById('password').focus();
-
-    var form = document.getElementById('login-form');
-    var btn  = document.getElementById('submit-btn');
-    var errEl = document.getElementById('error-msg');
-    var errTx = document.getElementById('error-text');
-
-    form.addEventListener('submit', function(e) {
-      e.preventDefault();
-      var password = document.getElementById('password').value.trim();
-      if (!password) return;
-
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span>Signing in…';
-      errEl.classList.remove('visible');
-
-      fetch('/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: password })
-      }).then(function(resp) {
-        if (resp.ok) {
-          window.location.href = '/';
-        } else {
-          return resp.json().then(function(data) {
-            errTx.textContent = data.error || 'Invalid credentials. Please try again.';
-            errEl.classList.add('visible');
-          }).catch(function() {
-            errTx.textContent = 'Invalid credentials. Please try again.';
-            errEl.classList.add('visible');
-          });
-        }
-      }).catch(function() {
-        errTx.textContent = 'Connection error. Please try again.';
-        errEl.classList.add('visible');
-      }).finally(function() {
-        btn.disabled = false;
-        btn.textContent = 'Sign in';
-      });
-    });
-  </script>
 </body>
 </html>

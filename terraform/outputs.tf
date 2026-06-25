@@ -1,6 +1,6 @@
 output "service_url" {
   description = "URL to access the PAT Monitor dashboard"
-  value       = "https://github-monitor.security.scapia.in"
+  value       = "https://octolens.security.scapia.in"
 }
 
 output "ecr_repository_url" {

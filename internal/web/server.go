@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/oauth2"
+
 	ghservice "github.com/th3-j0ik3r/github-pat-monitor/internal/github"
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/graph"
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/models"
@@ -36,6 +38,7 @@ type Server struct {
 	store       *store.Store
 	org         string
 	password    string
+	oauthCfg    *oauth2.Config
 	sessions    *sessionStore
 	report      *models.OrgReport
 	mu          sync.RWMutex
@@ -62,16 +65,19 @@ type Server struct {
 }
 
 type Config struct {
-	Addr          string
-	Port          int
-	Password      string
-	TLSCert       string
-	TLSKey        string
-	Org           string
-	ScanInterval  time.Duration
-	PolicyPath    string
-	SlackWebhook  string
-	WebhookSecret string
+	Addr               string
+	Port               int
+	Password           string
+	TLSCert            string
+	TLSKey             string
+	Org                string
+	ScanInterval       time.Duration
+	PolicyPath         string
+	SlackWebhook       string
+	WebhookSecret      string
+	GoogleClientID     string
+	GoogleClientSecret string
+	PublicURL          string // e.g. "https://octolens.security.scapia.in"
 }
 
 func NewServer(gh *ghservice.GitHubService, sc *scanner.Scanner, st *store.Store, org string, password string) *Server {
@@ -86,8 +92,17 @@ func NewServer(gh *ghservice.GitHubService, sc *scanner.Scanner, st *store.Store
 	}
 }
 
-// Configure sets up policy engine, Slack notifier, and webhook secret.
+// Configure sets up policy engine, Slack notifier, webhook secret, and Google OAuth.
 func (s *Server) Configure(cfg Config) {
+	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
+		publicURL := cfg.PublicURL
+		if publicURL == "" {
+			publicURL = fmt.Sprintf("http://%s:%d", cfg.Addr, cfg.Port)
+		}
+		s.oauthCfg = newOAuthConfig(cfg.GoogleClientID, cfg.GoogleClientSecret, publicURL)
+		log.Printf("Google SSO enabled (domain: %s)", allowedDomain)
+	}
+
 	if cfg.PolicyPath != "" {
 		pol, err := policy.LoadFromFile(cfg.PolicyPath)
 		if err != nil {
@@ -118,10 +133,11 @@ func ValidateConfig(cfg Config) error {
 
 	isLoopback := addr == "127.0.0.1" || addr == "localhost" || addr == "::1"
 
-	if !isLoopback && cfg.Password == "" {
+	hasAuth := cfg.Password != "" || (cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "")
+	if !isLoopback && !hasAuth {
 		return fmt.Errorf(
-			"refusing to start: binding to %s without --password is insecure; "+
-				"set PAT_MONITOR_PASSWORD or use --password, or bind to 127.0.0.1",
+			"refusing to start: binding to %s without auth is insecure; "+
+				"set PAT_MONITOR_PASSWORD or GOOGLE_CLIENT_ID+GOOGLE_CLIENT_SECRET, or bind to 127.0.0.1",
 			addr,
 		)
 	}
@@ -415,6 +431,11 @@ func (s *Server) ListenAndServe(cfg Config) error {
 	})
 	mux.HandleFunc("POST /auth/login", s.handleAuthLogin)
 	mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
+	// Google OAuth routes (public — no session required)
+	if s.oauthCfg != nil {
+		mux.HandleFunc("GET /auth/google", s.handleGoogleLogin)
+		mux.HandleFunc("GET /auth/google/callback", s.handleGoogleCallback)
+	}
 
 	// API routes
 	mux.HandleFunc("GET /api/summary", s.handleSummary)
@@ -459,7 +480,8 @@ func (s *Server) ListenAndServe(cfg Config) error {
 	// Build middleware chain
 	var handler http.Handler = mux
 	handler = SecurityHeaders(handler)
-	handler = SessionAuth(s.sessions, s.password != "")(handler)
+	requireAuth := s.password != "" || s.oauthCfg != nil
+	handler = SessionAuth(s.sessions, requireAuth)(handler)
 	handler = RedactedLogger(handler)
 
 	// Graceful shutdown context
