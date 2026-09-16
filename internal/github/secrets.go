@@ -111,17 +111,46 @@ func (s *GitHubService) ListEnvironmentSecrets(ctx context.Context, repoID int64
 	return all, nil
 }
 
+// ListOrgSecretRepos returns the repo names allowed to see a selected-visibility
+// org secret. Only meaningful for secrets with Visibility == "selected" — org
+// secrets with "all"/"private" visibility aren't scoped to a specific repo list.
+func (s *GitHubService) ListOrgSecretRepos(ctx context.Context, secretName string) ([]string, error) {
+	var names []string
+
+	opts := &gh.ListOptions{PerPage: 100}
+	for {
+		list, resp, err := s.client.Actions.ListSelectedReposForOrgSecret(ctx, s.org, secretName, opts)
+		if err != nil {
+			return nil, fmt.Errorf("listing selected repos for org secret %q: %w", secretName, err)
+		}
+		for _, r := range list.Repositories {
+			names = append(names, r.GetName())
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return names, nil
+}
+
 // ListAllSecrets gathers org-level secrets and per-repo + per-environment secrets.
 func (s *GitHubService) ListAllSecrets(ctx context.Context, repos []*gh.Repository) ([]models.OrgSecret, error) {
 	var allSecrets []models.OrgSecret
+	var firstErr error
 
 	// Fetch secret creators from audit log (non-fatal if unavailable).
 	creators, _ := s.FetchSecretCreators(ctx)
 
-	// 1. Org-level secrets
+	// 1. Org-level secrets. Non-fatal: a transient failure here (e.g. a
+	// GitHub API 502) must not wipe out the per-repo/environment secrets
+	// fetched below — those are independent calls and still worth keeping.
+	// The error is remembered and returned alongside whatever we did
+	// collect, so callers can still surface it as a partial-failure warning.
 	orgSecrets, err := s.ListOrgSecrets(ctx)
 	if err != nil {
-		return nil, err
+		firstErr = err
 	}
 	allSecrets = append(allSecrets, orgSecrets...)
 
@@ -180,7 +209,7 @@ func (s *GitHubService) ListAllSecrets(ctx context.Context, repos []*gh.Reposito
 		}
 	}
 
-	return allSecrets, nil
+	return allSecrets, firstErr
 }
 
 // DeleteSecret deletes an Actions secret by scope.
