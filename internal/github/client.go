@@ -23,3 +23,8 @@ func NewGitHubService(client *github.Client, org string) *GitHubService {
 func (s *GitHubService) SetAppClient(c *github.Client) {
 	s.appClient = c
 }
+
+// Client returns the underlying installation-level GitHub API client.
+func (s *GitHubService) Client() *github.Client {
+	return s.client
+}
