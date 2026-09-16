@@ -9,10 +9,7 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
-const (
-	oauthStateCookie = "oauth_state"
-	allowedDomain    = "scapia.cards"
-)
+const oauthStateCookie = "oauth_state"
 
 func newOAuthConfig(clientID, clientSecret, redirectBase string) *oauth2.Config {
 	return &oauth2.Config{
@@ -81,15 +78,20 @@ func (s *Server) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce domain restriction — only @scapia.cards
-	if userInfo.HD != allowedDomain || !userInfo.VerifiedEmail {
+	// Enforce Workspace domain restriction, when configured — an empty
+	// s.allowedDomain means any verified Google account may sign in.
+	if s.allowedDomain != "" && (userInfo.HD != s.allowedDomain || !userInfo.VerifiedEmail) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprintf(w, `<!doctype html><html><body style="font-family:sans-serif;padding:40px">
 <h2>Access denied</h2><p>Only <strong>@%s</strong> accounts are allowed.<br>
 Signed in as: <code>%s</code></p>
 <p><a href="/login">← Back to login</a></p></body></html>`,
-			allowedDomain, userInfo.Email)
+			s.allowedDomain, userInfo.Email)
+		return
+	}
+	if s.allowedDomain == "" && !userInfo.VerifiedEmail {
+		http.Error(w, "email not verified", http.StatusForbidden)
 		return
 	}
 

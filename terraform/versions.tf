@@ -14,7 +14,7 @@ terraform {
 
   # Configure your remote state backend.
   # backend "s3" {
-  #   bucket         = "scapia-terraform-state"
+  #   bucket         = "your-terraform-state-bucket"
   #   key            = "security/github-pat-monitor/terraform.tfstate"
   #   region         = "ap-south-1"
   #   encrypt        = true

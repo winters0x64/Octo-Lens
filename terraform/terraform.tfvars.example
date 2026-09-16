@@ -10,12 +10,15 @@ private_subnet_ids = [
 ]
 
 # Name portion of the existing internal ALB DNS name
-# DNS: internal-Securi-Secur-Iom0UrbXs87b-1492441175.ap-south-1.elb.amazonaws.com
-alb_name = "Securi-Secur-Iom0UrbXs87b"
+# DNS: internal-<alb_name>-<id>.<region>.elb.amazonaws.com
+alb_name = "your-internal-alb-name"
+
+# Hostname the ALB listener rule routes to this service
+domain_name = "octo-lens.internal.example.com"
 
 # GitHub App config
-github_org    = "scapia"
-github_app_id = "3865240"
+github_org    = "your-org"
+github_app_id = "123456"
 
 # Set after first ECR push (run `terraform output ecr_push_commands`)
 # container_image = "123456789.dkr.ecr.ap-south-1.amazonaws.com/github-pat-monitor:latest"

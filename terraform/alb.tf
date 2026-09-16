@@ -47,7 +47,7 @@ resource "aws_lb_listener_rule" "app" {
 
   condition {
     host_header {
-      values = ["octolens.security.scapia.in"]
+      values = [var.domain_name]
     }
   }
 

@@ -15,21 +15,23 @@ variable "private_subnet_ids" {
 }
 
 variable "alb_name" {
-  description = "Name of the existing internal ALB (e.g. Securi-Secur-Iom0UrbXs87b)"
+  description = "Name of the existing internal ALB"
   type        = string
-  default     = "Securi-Secur-Iom0UrbXs87b"
+}
+
+variable "domain_name" {
+  description = "Hostname the ALB listener rule routes to this service (e.g. octo-lens.internal.example.com)"
+  type        = string
 }
 
 variable "github_org" {
   description = "GitHub organisation to monitor"
   type        = string
-  default     = "scapia"
 }
 
 variable "github_app_id" {
   description = "GitHub App ID"
   type        = string
-  default     = "3865240"
 }
 
 variable "scan_interval" {

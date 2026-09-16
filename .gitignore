@@ -8,8 +8,12 @@
 
 # Build artifacts
 /github-pat-monitor
+/octo-lens
 /dist/
 *.out
+
+# Local dev notes — may contain org-specific deployment details
+summary.md
 
 # OS / editor
 .DS_Store

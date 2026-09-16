@@ -15,7 +15,7 @@ func testReport() *models.OrgReport {
 		},
 		WorkflowFiles: []models.WorkflowFile{
 			{
-				RepoName: "scapia-backend", FileName: "deploy.yml", Permissions: "write-all", Risk: models.RiskHigh,
+				RepoName: "acme-backend", FileName: "deploy.yml", Permissions: "write-all", Risk: models.RiskHigh,
 				Actions: []models.ActionRef{
 					{Raw: "actions/checkout@v4", Owner: "actions", Name: "checkout", Ref: "v4", Kind: "marketplace"},
 					{Raw: "aws-actions/configure-aws-credentials@v4", Owner: "aws-actions", Name: "configure-aws-credentials", Ref: "v4", Kind: "marketplace"},
@@ -81,7 +81,7 @@ func TestFindings(t *testing.T) {
 	f := g.Findings()
 
 	// payments-service/ci.yml has pull_request_target + reaches the prod OIDC
-	// role transitively? No — only scapia-backend assumes the role. But ci.yml
+	// role transitively? No — only acme-backend assumes the role. But ci.yml
 	// has a dangerous trigger with secret access, so it must yield a critical/
 	// high fix_trigger action item.
 	var fixTrigger *ActionItem
@@ -94,7 +94,7 @@ func TestFindings(t *testing.T) {
 		t.Fatalf("expected a fix_trigger action item for pull_request_target; got %d actions", len(f.Actions))
 	}
 
-	// scapia-backend/deploy.yml reaches ProdDeployRole -> at least one attack path.
+	// acme-backend/deploy.yml reaches ProdDeployRole -> at least one attack path.
 	if len(f.Paths) == 0 {
 		t.Fatal("expected at least one attack path to production")
 	}
@@ -238,13 +238,13 @@ func TestPerWorkflowActionPinning(t *testing.T) {
 // supply-chain dependency.
 func TestSelfRepoActionNotThirdParty(t *testing.T) {
 	r := &models.OrgReport{
-		Org: "scapia",
+		Org: "acme",
 		WorkflowFiles: []models.WorkflowFile{
 			{
 				RepoName: "security-stage", FileName: "org-scan.yml", Permissions: "read-all", Risk: models.RiskHigh,
 				Actions: []models.ActionRef{
 					// own-repo action referenced cross-path on a branch — must be ignored
-					{Raw: "scapia/security-stage/.github/actions/send-sqs-metrics@master", Owner: "scapia", Name: "security-stage/.github/actions/send-sqs-metrics", Ref: "master", Pinned: false, Kind: "marketplace"},
+					{Raw: "acme/security-stage/.github/actions/send-sqs-metrics@master", Owner: "acme", Name: "security-stage/.github/actions/send-sqs-metrics", Ref: "master", Pinned: false, Kind: "marketplace"},
 				},
 				OIDCRoles: []string{"arn:aws:iam::111122223333:role/ProdRole"}, Triggers: []string{"workflow_dispatch"}, IDTokenWrite: true,
 			},

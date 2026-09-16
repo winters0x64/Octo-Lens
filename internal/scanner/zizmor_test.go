@@ -21,7 +21,7 @@ const zizmorJSON = `[
     "url": "https://docs.zizmor.sh/audits/#artipacked",
     "determinations": { "confidence": "Low", "severity": "Medium", "persona": "Regular" },
     "locations": [
-      { "symbolic": { "key": { "Local": { "given_path": "/tmp/zizmor-123/scapia-backend/.github/workflows/deploy.yml" } }, "kind": "Primary" },
+      { "symbolic": { "key": { "Local": { "given_path": "/tmp/zizmor-123/acme-backend/.github/workflows/deploy.yml" } }, "kind": "Primary" },
         "concrete": { "location": { "start_point": { "row": 7, "column": 8 } } } }
     ]
   }
@@ -48,7 +48,7 @@ func TestParseZizmorOutput(t *testing.T) {
 		t.Errorf("line = %d, want 12", f.Line)
 	}
 
-	dep := got["scapia-backend|.github/workflows/deploy.yml"]
+	dep := got["acme-backend|.github/workflows/deploy.yml"]
 	if len(dep) != 1 || dep[0].Severity != "medium" {
 		t.Errorf("deploy.yml finding wrong: %+v", dep)
 	}

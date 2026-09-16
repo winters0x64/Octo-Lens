@@ -1,7 +1,7 @@
 // Package diff is the pure-function layer that converts (existing DB rows,
 // fresh scan results) into (current-row updates, event log entries).
 //
-// It depends only on the model types and the policy engine — no Postgres,
+// It depends only on the model types and the policy engine — no MySQL,
 // no networking — so the logic can be exercised by table-driven unit tests
 // without touching a database.
 package diff
