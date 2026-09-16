@@ -1738,6 +1738,19 @@ tr.diff-new td:first-child { border-left: 2px solid rgba(0,227,150,0.5); }
   padding: 1px 7px; border-radius: 999px;
 }
 .findings-empty { font-size: 12.5px; color: var(--text-dim); padding: 8px 0; }
+
+/* All / Verified / Unverified toggle above the Top Findings list. */
+.findings-filter-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.findings-filter-btn {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 13px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.findings-filter-btn:hover { border-color: var(--accent); color: var(--text); }
+.findings-filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.findings-filter-btn .ff-count {
+  font-size: 11px; font-weight: 700; opacity: 0.8; margin-left: 2px;
+}
 .findings-list { display: flex; flex-direction: column; gap: 8px; }
 
 /* Pager for the (now long) attack-paths / action-items lists. */
@@ -2022,3 +2035,40 @@ tr.diff-new td:first-child { border-left: 2px solid rgba(0,227,150,0.5); }
 .cf-name { flex: 1 1 auto; color: var(--text); min-width: 0; }
 .cf-fix { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--accent); text-decoration: none; }
 .cf-fix:hover { text-decoration: underline; }
+
+/* ─── Secret verification ─────────────────────────── */
+.action-btn.verify {
+  background: rgba(99,102,241,0.08);
+  color: #6366f1;
+  border: 1px solid rgba(99,102,241,0.3);
+}
+.action-btn.verify:hover:not(:disabled) { background: rgba(99,102,241,0.18); }
+@media (prefers-color-scheme: dark) {
+  .action-btn.verify { color: #818cf8; border-color: rgba(129,140,248,0.3); background: rgba(129,140,248,0.1); }
+}
+
+.verify-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+.verify-status.valid   { background: var(--sev-none-bg);   color: var(--sev-none);   border: 1px solid rgba(5,150,105,0.25); }
+.verify-status.invalid { background: var(--sev-high-bg);   color: var(--sev-high);   border: 1px solid rgba(220,38,38,0.25); }
+.verify-status.pending { background: var(--neutral-bg);    color: var(--text-muted); border: 1px solid var(--border); }
+
+.verify-detail { display: flex; flex-direction: column; gap: 4px; }
+.verify-detail-row { display: flex; gap: 8px; font-size: 12px; }
+.verify-detail-row .vd-label { color: var(--text-muted); min-width: 80px; }
+.verify-detail-row .vd-value { color: var(--text); font-weight: 500; }
+.verify-perms { display: flex; flex-wrap: wrap; gap: 3px; }
+.verify-perms .perm-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: var(--neutral-bg); border: 1px solid var(--border); color: var(--text-muted); }
+
+.verify-all-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 14px;
+  border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+  background: rgba(99,102,241,0.08); color: #6366f1; border: 1px solid rgba(99,102,241,0.3);
+  font-family: inherit; transition: background 0.15s;
+}
+.verify-all-btn:hover:not(:disabled) { background: rgba(99,102,241,0.18); }
+.verify-all-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (prefers-color-scheme: dark) {
+  .verify-all-btn { color: #818cf8; border-color: rgba(129,140,248,0.3); background: rgba(129,140,248,0.1); }
+}
+
+.verify-progress { font-size: 11px; color: var(--text-muted); margin-left: 8px; }

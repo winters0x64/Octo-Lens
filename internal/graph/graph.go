@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/models"
+	"github.com/th3-j0ik3r/github-pat-monitor/internal/verify"
 )
 
 // arnAccountRe extracts the 12-digit AWS account ID from a role ARN.
@@ -32,22 +33,22 @@ func AWSAccountFromARN(arn string) (string, bool) {
 
 // Node and edge type constants. Node types align with the dashboard legend.
 const (
-	NodePAT       = "pat"
-	NodeApp       = "app"
-	NodeSSO       = "sso"
-	NodeDeployKey = "deploy_key"
-	NodeAllRepos  = "all_repos"
-	NodeRepo      = "repo"
-	NodeWorkflow  = "workflow"
-	NodeAction    = "action"
-	NodeSecret    = "secret"
-	NodeEnv       = "environment"
+	NodePAT        = "pat"
+	NodeApp        = "app"
+	NodeSSO        = "sso"
+	NodeDeployKey  = "deploy_key"
+	NodeAllRepos   = "all_repos"
+	NodeRepo       = "repo"
+	NodeWorkflow   = "workflow"
+	NodeAction     = "action"
+	NodeSecret     = "secret"
+	NodeEnv        = "environment"
 	NodeOIDCRole   = "oidc_role"
 	NodeAWSAccount = "aws_account"
 
-	EdgeControls    = "controls"         // principal/repo -> repo/workflow
-	EdgeIncludes    = "includes"         // all_repos -> repo
-	EdgeCanHijack   = "can_hijack"       // action -> workflow
+	EdgeControls    = "controls"          // principal/repo -> repo/workflow
+	EdgeIncludes    = "includes"          // all_repos -> repo
+	EdgeCanHijack   = "can_hijack"        // action -> workflow
 	EdgeReadsSecret = "references_secret" // workflow -> secret
 	EdgeAssumesRole = "assumes_role"      // workflow -> oidc_role
 	EdgeInAccount   = "in_account"        // oidc_role -> aws_account
@@ -140,7 +141,7 @@ func (g *Graph) edgePinned(src, dst, typ string) bool {
 
 type builder struct {
 	g         *Graph
-	order     []string       // node ids in insertion order
+	order     []string // node ids in insertion order
 	edgeSeen  map[string]bool
 	edgeIndex map[string]int // edge key -> index into g.Edges (for in-place updates)
 
@@ -274,15 +275,77 @@ func (b *builder) indexSecrets(r *models.OrgReport) {
 	for _, s := range r.Secrets {
 		id := secretID(s)
 		cls := classifySecret(s.Name)
-		b.addNode(id, NodeSecret, s.Name, secretNodeRisk(s, cls), map[string]any{
+		risk := secretNodeRisk(s, cls)
+
+		meta := map[string]any{
 			"scope": s.Scope, "visibility": s.Visibility,
 			"repo_name": s.RepoName, "env_name": s.EnvName,
 			"updated_at": s.UpdatedAt,
-			// Supply-chain classification: what this secret unlocks and whether a
-			// compromised job reaching it constitutes a path to production.
-			"category": cls.Category, "provider": cls.Provider, "target": cls.Target,
+			"category":   cls.Category, "provider": cls.Provider, "target": cls.Target,
 			"criticality": cls.Criticality, "boundary": cls.Boundary, "long_lived": cls.LongLived,
-		})
+		}
+
+		// When verification data is available, override heuristic classification
+		// with evidence-based values.
+		if s.Verified {
+			meta["verified"] = true
+			meta["valid"] = s.Valid
+			meta["verify_provider"] = s.VerifyProvider
+			meta["verify_identity"] = s.VerifyIdentity
+			meta["verify_permissions"] = s.VerifyPerms
+			meta["verify_error"] = s.VerifyError
+			meta["verify_recognized"] = s.VerifyRecognized
+			if s.VerifiedAt != nil {
+				meta["verified_at"] = s.VerifiedAt
+			}
+
+			switch {
+			case !s.VerifyRecognized:
+				// The value didn't match any credential format we check for —
+				// Valid is false by convention here, but that's NOT evidence
+				// the secret is dead (an SSH key, webhook URL, or non-secret
+				// config value we don't pattern-match could still be live and
+				// dangerous). Leave the name-based heuristic classification
+				// alone rather than misreading "unrecognized" as "confirmed
+				// dead" — same principle as TierUnknown below.
+			case !s.Valid:
+				risk = "low"
+				cls.Boundary = false
+				meta["boundary"] = false
+				meta["criticality"] = "low"
+			case s.VerifyProvider != "":
+				meta["provider"] = verifiedProviderLabel(s.VerifyProvider)
+				if s.VerifyIdentity != "" {
+					meta["target"] = s.VerifyIdentity
+				}
+				// A real permission tier — what the credential can actually DO,
+				// evaluated against the live provider — is ground truth and
+				// should override the name-based criticality/risk heuristic
+				// above. "unknown" (couldn't determine the credential's actual
+				// scope) deliberately leaves the heuristic alone rather than
+				// guessing either direction.
+				if s.VerifyPermissionTier != "" && s.VerifyPermissionTier != verify.TierUnknown {
+					meta["verify_permission_tier"] = s.VerifyPermissionTier
+					meta["verify_permission_reasons"] = s.VerifyPermissionReasons
+					switch s.VerifyPermissionTier {
+					case verify.TierCritical:
+						meta["criticality"] = "critical"
+						risk = "high"
+					case verify.TierHigh:
+						meta["criticality"] = "high"
+						risk = "high"
+					case verify.TierMedium:
+						meta["criticality"] = "medium"
+						risk = "medium"
+					case verify.TierLow:
+						meta["criticality"] = "low"
+						risk = "low"
+					}
+				}
+			}
+		}
+
+		b.addNode(id, NodeSecret, s.Name, risk, meta)
 		switch s.Scope {
 		case "org":
 			b.orgSecrets[s.Name] = id
@@ -486,8 +549,8 @@ func collectRepos(r *models.OrgReport) map[string]bool {
 }
 
 // isSelfRepoAction reports whether a cross-repo action reference actually points
-// at the workflow's OWN repository — e.g. a workflow in scapia/security-stage
-// using `scapia/security-stage/.github/actions/x@master`. That's the same repo's
+// at the workflow's OWN repository — e.g. a workflow in acme/security-stage
+// using `acme/security-stage/.github/actions/x@master`. That's the same repo's
 // code (equivalent to a local ./x action), first-party, not a third-party
 // dependency — so it shouldn't count as a supply-chain / hijack entry point.
 func isSelfRepoAction(a models.ActionRef, org, repo string) bool {
@@ -512,6 +575,25 @@ func orgAvatarFromApps(apps []models.AppInstallation) string {
 		}
 	}
 	return ""
+}
+
+func verifiedProviderLabel(provider string) string {
+	switch provider {
+	case "aws":
+		return "AWS (verified)"
+	case "github":
+		return "GitHub token (verified)"
+	case "gcp":
+		return "GCP (verified)"
+	case "slack":
+		return "Slack (verified)"
+	case "stripe":
+		return "Stripe (verified)"
+	case "generic":
+		return "Credential (verified present)"
+	default:
+		return provider + " (verified)"
+	}
 }
 
 func isProdLike(env string) bool {
@@ -553,7 +635,7 @@ func shortRepo(full string) string {
 	return full
 }
 
-func repoID(name string) string     { return "repo:" + name }
+func repoID(name string) string           { return "repo:" + name }
 func workflowID(repo, file string) string { return "workflow:" + repo + "/" + file }
 
 func actionID(a models.ActionRef) string {

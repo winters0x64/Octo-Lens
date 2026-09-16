@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,16 +34,24 @@ import (
 )
 
 type Server struct {
-	gh          *ghservice.GitHubService
-	scanner     *scanner.Scanner
-	store       *store.Store
-	org         string
-	password    string
-	oauthCfg    *oauth2.Config
-	sessions    *sessionStore
-	report      *models.OrgReport
-	mu          sync.RWMutex
-	scanLimiter *RateLimiter
+	gh            *ghservice.GitHubService
+	scanner       *scanner.Scanner
+	store         *store.Store
+	org           string
+	password      string
+	oauthCfg      *oauth2.Config
+	allowedDomain string // Google Workspace hosted-domain restriction; empty = unrestricted
+	sessions      *sessionStore
+	report        *models.OrgReport
+	mu            sync.RWMutex
+	scanLimiter   *RateLimiter
+
+	// verifyRunning prevents a scheduled verify-all sweep from overlapping
+	// with another one (manual or scheduled) — a sweep pushes a branch and
+	// runs GitHub Actions per repo and can take 20+ minutes across a large
+	// org, so a second sweep starting mid-run would race the first on the
+	// same repos for no benefit.
+	verifyRunning atomic.Bool
 
 	// Policy and alerting
 	policy        *policy.Policy
@@ -65,19 +74,21 @@ type Server struct {
 }
 
 type Config struct {
-	Addr               string
-	Port               int
-	Password           string
-	TLSCert            string
-	TLSKey             string
-	Org                string
-	ScanInterval       time.Duration
-	PolicyPath         string
-	SlackWebhook       string
-	WebhookSecret      string
-	GoogleClientID     string
-	GoogleClientSecret string
-	PublicURL          string // e.g. "https://octolens.security.scapia.in"
+	Addr                string
+	Port                int
+	Password            string
+	TLSCert             string
+	TLSKey              string
+	Org                 string
+	ScanInterval        time.Duration
+	VerifyInterval      time.Duration // 0 disables scheduled secret verification
+	PolicyPath          string
+	SlackWebhook        string
+	WebhookSecret       string
+	GoogleClientID      string
+	GoogleClientSecret  string
+	GoogleAllowedDomain string // restrict Google SSO to this Workspace domain; empty = unrestricted
+	PublicURL           string // e.g. "https://your-octo-lens-host.example.com"
 }
 
 func NewServer(gh *ghservice.GitHubService, sc *scanner.Scanner, st *store.Store, org string, password string) *Server {
@@ -100,7 +111,12 @@ func (s *Server) Configure(cfg Config) {
 			publicURL = fmt.Sprintf("http://%s:%d", cfg.Addr, cfg.Port)
 		}
 		s.oauthCfg = newOAuthConfig(cfg.GoogleClientID, cfg.GoogleClientSecret, publicURL)
-		log.Printf("Google SSO enabled (domain: %s)", allowedDomain)
+		s.allowedDomain = cfg.GoogleAllowedDomain
+		if s.allowedDomain != "" {
+			log.Printf("Google SSO enabled (restricted to domain: %s)", s.allowedDomain)
+		} else {
+			log.Printf("Google SSO enabled (WARNING: no domain restriction configured — any Google account can sign in; set --google-allowed-domain)")
+		}
 	}
 
 	if cfg.PolicyPath != "" {
@@ -223,6 +239,12 @@ func (s *Server) runScan(ctx context.Context) {
 	prevAppsWasComplete := s.prevAppsComplete
 	prevSecretsWasComplete := s.prevSecretsComplete
 	prevDKsWasComplete := s.prevDKsComplete
+	if s.report != nil {
+		// A fresh scan has no verification data of its own (verification only
+		// ever runs via the manual /api/verify-secrets endpoints) — without this,
+		// every rescan would silently reset all secrets back to unverified.
+		report.Secrets = mergeVerifiedSecrets(s.report.Secrets, report.Secrets)
+	}
 	s.prevReport = s.report
 	s.report = report
 	s.prevAppsComplete = result.AppsComplete
@@ -250,6 +272,49 @@ func (s *Server) runScan(ctx context.Context) {
 
 	s.onScanComplete(report)
 	s.sendSlackAlerts(diff, prevAppsWasComplete, prevSecretsWasComplete, prevDKsWasComplete)
+}
+
+// mergeVerifiedSecrets carries forward verification results from the previous
+// report onto matching secrets in a freshly scanned report. Verification only
+// ever happens via the manual /api/verify-secrets endpoints — a scan never
+// produces verification data on its own — so without this, every background
+// rescan would silently reset every secret back to unverified.
+//
+// A secret only keeps its prior verdict if its UpdatedAt is unchanged from
+// when it was verified: if the secret's value was rotated since then, the old
+// valid/invalid verdict no longer applies to whatever value is there now.
+func mergeVerifiedSecrets(prev, fresh []models.OrgSecret) []models.OrgSecret {
+	type secretKey struct{ scope, repo, env, name string }
+
+	prevByKey := make(map[secretKey]models.OrgSecret, len(prev))
+	for _, sec := range prev {
+		if !sec.Verified {
+			continue
+		}
+		prevByKey[secretKey{sec.Scope, sec.RepoName, sec.EnvName, sec.Name}] = sec
+	}
+	if len(prevByKey) == 0 {
+		return fresh
+	}
+
+	for i := range fresh {
+		f := &fresh[i]
+		old, ok := prevByKey[secretKey{f.Scope, f.RepoName, f.EnvName, f.Name}]
+		if !ok || !old.UpdatedAt.Equal(f.UpdatedAt) {
+			continue
+		}
+		f.Verified = old.Verified
+		f.Valid = old.Valid
+		f.VerifyProvider = old.VerifyProvider
+		f.VerifyIdentity = old.VerifyIdentity
+		f.VerifyPerms = old.VerifyPerms
+		f.VerifyError = old.VerifyError
+		f.VerifiedAt = old.VerifiedAt
+		f.VerifyPermissionTier = old.VerifyPermissionTier
+		f.VerifyPermissionReasons = old.VerifyPermissionReasons
+		f.VerifyRecognized = old.VerifyRecognized
+	}
+	return fresh
 }
 
 func (s *Server) sendSlackAlerts(diff ScanDiff, prevAppsComplete, prevSecretsComplete, prevDKsComplete bool) {
@@ -426,8 +491,22 @@ func (s *Server) ListenAndServe(cfg Config) error {
 			http.NotFound(w, r)
 			return
 		}
+		page := string(data)
+		if s.oauthCfg == nil {
+			page = strings.Replace(page, `<!-- PASSWORD_FORM_START`, "", 1)
+			page = strings.Replace(page, `PASSWORD_FORM_END -->`, "", 1)
+			page = strings.Replace(page, `<!-- GOOGLE_SSO_START -->`, `<!-- GOOGLE_SSO_START`, 1)
+			page = strings.Replace(page, `<!-- GOOGLE_SSO_END -->`, `GOOGLE_SSO_END -->`, 1)
+		} else if s.allowedDomain == "" {
+			// No domain restriction configured — the note would be false, so
+			// drop it rather than show a hardcoded/stale domain.
+			page = strings.Replace(page, `<!-- RESTRICTED_NOTE_START -->`, `<!-- RESTRICTED_NOTE_START`, 1)
+			page = strings.Replace(page, `<!-- RESTRICTED_NOTE_END -->`, `RESTRICTED_NOTE_END -->`, 1)
+		} else {
+			page = strings.Replace(page, `__ALLOWED_DOMAIN__`, s.allowedDomain, 1)
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		w.Write([]byte(page))
 	})
 	mux.HandleFunc("POST /auth/login", s.handleAuthLogin)
 	mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
@@ -462,6 +541,9 @@ func (s *Server) ListenAndServe(cfg Config) error {
 	mux.HandleFunc("GET /api/attack-graph/findings", s.handleAttackFindings)
 	mux.HandleFunc("GET /api/actions-inventory", s.handleActionsInventory)
 	mux.HandleFunc("GET /api/blast-radius", s.handleBlastRadius)
+	mux.HandleFunc("POST /api/verify-secrets", s.handleVerifySecrets)
+	mux.HandleFunc("POST /api/verify-org-secrets", s.handleVerifyOrgSecrets)
+	mux.HandleFunc("POST /api/verify-all", s.handleVerifyAll)
 	mux.HandleFunc("POST /api/pats/requests/{id}/review", s.handleReviewPATRequest)
 	mux.HandleFunc("POST /api/pats/{id}/revoke", s.handleRevokePAT)
 	mux.HandleFunc("POST /api/apps/{id}/suspend", s.handleSuspendApp)
@@ -523,7 +605,7 @@ func (s *Server) ListenAndServe(cfg Config) error {
 			go s.runScan(context.Background())
 		}
 	} else {
-		// No Postgres — blocking scan.
+		// No MySQL — blocking scan.
 		s.runScan(context.Background())
 	}
 
@@ -532,6 +614,15 @@ func (s *Server) ListenAndServe(cfg Config) error {
 	if cfg.ScanInterval > 0 {
 		go s.scheduledScan(ctx, cfg.ScanInterval)
 		log.Printf("Scheduled scanning every %s", cfg.ScanInterval)
+	}
+
+	// Scheduled secret verification — deliberately a separate, independent
+	// interval from ScanInterval: a verify-all sweep pushes a temp branch and
+	// runs GitHub Actions per repo (20+ minutes across a large org), so it's
+	// too invasive to run on the same cadence as a plain scan. Off by default.
+	if cfg.VerifyInterval > 0 {
+		go s.scheduledVerify(ctx, cfg.VerifyInterval)
+		log.Printf("Scheduled secret verification every %s", cfg.VerifyInterval)
 	}
 
 	addr := cfg.Addr
@@ -580,6 +671,45 @@ func (s *Server) scheduledScan(ctx context.Context, interval time.Duration) {
 			// The ticker loop itself still respects ctx so we stop scheduling new
 			// scans on shutdown, but any in-flight scan runs to completion.
 			go s.runScan(context.Background())
+		}
+	}
+}
+
+// scheduledVerify periodically runs a verify-all sweep over every not-yet-
+// verified secret. Ticks that land while a sweep (manual or scheduled) is
+// already in progress are skipped rather than queued — see verifyRunning.
+func (s *Server) scheduledVerify(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.verifyRunning.CompareAndSwap(false, true) {
+				log.Printf("[verify-all] skipping scheduled sweep — one is already in progress")
+				continue
+			}
+			// context.Background(): a sweep mid-way through pushing/cleaning up
+			// branches across many repos must not be canceled by SIGTERM.
+			go func() {
+				defer s.verifyRunning.Store(false)
+				s.mu.RLock()
+				report := s.report
+				s.mu.RUnlock()
+				if report == nil {
+					return
+				}
+				start := time.Now()
+				results, allDone := s.runVerifyAll(context.Background(), report)
+				if allDone {
+					log.Printf("[verify-all] scheduled sweep: nothing to verify")
+					return
+				}
+				log.Printf("[verify-all] scheduled sweep completed in %s across %d repo(s)",
+					time.Since(start).Round(time.Second), len(results))
+			}()
 		}
 	}
 }

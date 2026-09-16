@@ -14,21 +14,23 @@ import (
 )
 
 var (
-	flagAddr               string
-	flagPort               int
-	flagPassword           string
-	flagTLSCert            string
-	flagTLSKey             string
-	flagScanInterval       time.Duration
-	flagPolicyPath         string
-	flagSlackWebhook       string
-	flagWebhookSecret      string
-	flagDatabaseURL        string
-	flagAutoMigrate        bool
-	flagEventRetentionDays int
-	flagGoogleClientID     string
-	flagGoogleClientSecret string
-	flagPublicURL          string
+	flagAddr                string
+	flagPort                int
+	flagPassword            string
+	flagTLSCert             string
+	flagTLSKey              string
+	flagScanInterval        time.Duration
+	flagVerifyInterval      time.Duration
+	flagPolicyPath          string
+	flagSlackWebhook        string
+	flagWebhookSecret       string
+	flagDatabaseURL         string
+	flagAutoMigrate         bool
+	flagEventRetentionDays  int
+	flagGoogleClientID      string
+	flagGoogleClientSecret  string
+	flagGoogleAllowedDomain string
+	flagPublicURL           string
 )
 
 var serveCmd = &cobra.Command{
@@ -41,7 +43,7 @@ The server provides a web dashboard and API for monitoring PATs, Apps, and
 SSO credentials. It can automatically rescan on an interval and alert via
 Slack when policy violations are detected.
 
-When DATABASE_URL is set, scan results are persisted to Postgres with an
+When DATABASE_URL is set, scan results are persisted to MySQL with an
 append-only event log capturing status flips and watched-field changes.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Resolve from env vars
@@ -65,6 +67,9 @@ append-only event log capturing status flips and watched-field changes.`,
 		}
 		if flagGoogleClientSecret == "" {
 			flagGoogleClientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
+		}
+		if flagGoogleAllowedDomain == "" {
+			flagGoogleAllowedDomain = os.Getenv("GOOGLE_ALLOWED_DOMAIN")
 		}
 		if flagPublicURL == "" {
 			flagPublicURL = os.Getenv("PUBLIC_URL")
@@ -90,7 +95,7 @@ append-only event log capturing status flips and watched-field changes.`,
 				cancel2()
 				log.Printf("Migrations applied")
 			}
-			log.Printf("Persistence enabled (Postgres)")
+			log.Printf("Persistence enabled (MySQL)")
 		} else {
 			log.Printf("Persistence disabled (DATABASE_URL not set)")
 		}
@@ -101,19 +106,21 @@ append-only event log capturing status flips and watched-field changes.`,
 		srv := web.NewServer(ghService, sc, st, flagOrg, flagPassword)
 
 		return srv.ListenAndServe(web.Config{
-			Addr:               flagAddr,
-			Port:               flagPort,
-			Password:           flagPassword,
-			TLSCert:            flagTLSCert,
-			TLSKey:             flagTLSKey,
-			Org:                flagOrg,
-			ScanInterval:       flagScanInterval,
-			PolicyPath:         flagPolicyPath,
-			SlackWebhook:       flagSlackWebhook,
-			WebhookSecret:      flagWebhookSecret,
-			GoogleClientID:     flagGoogleClientID,
-			GoogleClientSecret: flagGoogleClientSecret,
-			PublicURL:          flagPublicURL,
+			Addr:                flagAddr,
+			Port:                flagPort,
+			Password:            flagPassword,
+			TLSCert:             flagTLSCert,
+			TLSKey:              flagTLSKey,
+			Org:                 flagOrg,
+			ScanInterval:        flagScanInterval,
+			VerifyInterval:      flagVerifyInterval,
+			PolicyPath:          flagPolicyPath,
+			SlackWebhook:        flagSlackWebhook,
+			WebhookSecret:       flagWebhookSecret,
+			GoogleClientID:      flagGoogleClientID,
+			GoogleClientSecret:  flagGoogleClientSecret,
+			GoogleAllowedDomain: flagGoogleAllowedDomain,
+			PublicURL:           flagPublicURL,
 		})
 	},
 }
@@ -125,14 +132,16 @@ func init() {
 	serveCmd.Flags().StringVar(&flagTLSCert, "tls-cert", "", "Path to TLS certificate file")
 	serveCmd.Flags().StringVar(&flagTLSKey, "tls-key", "", "Path to TLS private key file")
 	serveCmd.Flags().DurationVar(&flagScanInterval, "scan-interval", 1*time.Hour, "Auto-rescan interval (e.g. 5m, 1h, 0 to disable)")
+	serveCmd.Flags().DurationVar(&flagVerifyInterval, "verify-interval", 0, "Auto-verify-secrets interval (e.g. 6h, 24h, 0 to disable). A sweep pushes a temp branch and runs GitHub Actions per repo, so keep this much longer than --scan-interval.")
 	serveCmd.Flags().StringVar(&flagPolicyPath, "policy", "", "Path to policy YAML file (env: PAT_MONITOR_POLICY_PATH)")
 	serveCmd.Flags().StringVar(&flagSlackWebhook, "slack-webhook", "", "Slack webhook URL for alerts (env: SLACK_WEBHOOK_URL)")
 	serveCmd.Flags().StringVar(&flagWebhookSecret, "webhook-secret", "", "GitHub webhook secret for signature verification (env: GITHUB_WEBHOOK_SECRET)")
-	serveCmd.Flags().StringVar(&flagDatabaseURL, "database-url", "", "Postgres connection string (env: DATABASE_URL). When unset, persistence is disabled.")
+	serveCmd.Flags().StringVar(&flagDatabaseURL, "database-url", "", "MySQL connection string (env: DATABASE_URL). When unset, persistence is disabled.")
 	serveCmd.Flags().BoolVar(&flagAutoMigrate, "auto-migrate", true, "Apply embedded goose migrations on startup")
 	serveCmd.Flags().IntVar(&flagEventRetentionDays, "event-retention-days", 0, "Prune events older than N days (0 = keep forever)")
 	serveCmd.Flags().StringVar(&flagGoogleClientID, "google-client-id", "", "Google OAuth client ID (env: GOOGLE_CLIENT_ID)")
 	serveCmd.Flags().StringVar(&flagGoogleClientSecret, "google-client-secret", "", "Google OAuth client secret (env: GOOGLE_CLIENT_SECRET)")
-	serveCmd.Flags().StringVar(&flagPublicURL, "public-url", "", "Public base URL for OAuth redirect (env: PUBLIC_URL, e.g. https://octolens.security.scapia.in)")
+	serveCmd.Flags().StringVar(&flagPublicURL, "public-url", "", "Public base URL for OAuth redirect (env: PUBLIC_URL, e.g. https://octo-lens.example.com)")
+	serveCmd.Flags().StringVar(&flagGoogleAllowedDomain, "google-allowed-domain", "", "Restrict Google SSO to this Google Workspace domain (env: GOOGLE_ALLOWED_DOMAIN). Leave unset to allow any verified Google account — set this if you enable Google SSO.")
 	rootCmd.AddCommand(serveCmd)
 }

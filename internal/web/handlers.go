@@ -6,10 +6,8 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	ghservice "github.com/th3-j0ik3r/github-pat-monitor/internal/github"
-	"github.com/th3-j0ik3r/github-pat-monitor/internal/persist"
 )
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
@@ -149,45 +147,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]string{"status": "scanning"})
 
-	go func() {
-		ctx := context.Background()
-		result, err := s.scanner.Scan(ctx)
-		if err != nil {
-			log.Printf("ERROR: background scan failed: %v", err)
-			return
-		}
-		report := result.Report
-		report.Org = s.org
-
-		s.mu.Lock()
-		prevAppsWasComplete := s.prevAppsComplete
-		prevSecretsWasComplete := s.prevSecretsComplete
-		prevDKsWasComplete := s.prevDKsComplete
-		s.prevReport = s.report
-		s.report = report
-		s.prevAppsComplete = result.AppsComplete
-		s.prevSecretsComplete = result.SecretsComplete
-		s.prevDKsComplete = result.DeployKeysComplete
-		s.mu.Unlock()
-
-		if summary := result.PhaseErrorSummary(); summary != "" {
-			log.Printf("WARNING: scan had partial failures: %s", summary)
-		}
-
-		if s.store != nil {
-			if err := persist.Apply(ctx, s.store, result, s.policy, time.Now()); err != nil {
-				log.Printf("WARNING: persistence failed: %v", err)
-			}
-		}
-
-		diff := computeDiff(s.prevReport, report)
-		s.mu.Lock()
-		s.scanDiff = diff
-		s.mu.Unlock()
-
-		s.onScanComplete(report)
-		s.sendSlackAlerts(diff, prevAppsWasComplete, prevSecretsWasComplete, prevDKsWasComplete)
-	}()
+	go s.runScan(context.Background())
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {

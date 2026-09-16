@@ -1,6 +1,9 @@
 package graph
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // Findings is the insight-first payload: ranked attack paths to production and
 // prioritized, deduplicated remediation action items. This is the primary
@@ -13,7 +16,7 @@ type Findings struct {
 // PathStep is one hop in a readable attack chain (trigger → workflow → secret
 // → boundary), rendered as a sentence in the UI.
 type PathStep struct {
-	Kind  string `json:"kind"`  // trigger | workflow | secret | oidc_role | environment
+	Kind  string `json:"kind"` // trigger | workflow | secret | oidc_role | environment
 	Label string `json:"label"`
 	Note  string `json:"note,omitempty"`
 }
@@ -28,14 +31,28 @@ type AttackPath struct {
 	Steps        []PathStep `json:"steps"`
 	Boundary     string     `json:"boundary"`
 	BoundaryType string     `json:"boundary_type"`
-	AWSAccount   string     `json:"aws_account"`        // account ID, or "" when templated/non-AWS
+	AWSAccount   string     `json:"aws_account"` // account ID, or "" when templated/non-AWS
 	Factors      []string   `json:"factors"`
-	Trigger      string     `json:"trigger"`            // the event that can initiate the path
-	TriggerRisk  string     `json:"trigger_risk"`       // how/by whom it can be triggered
+	Trigger      string     `json:"trigger"`      // the event that can initiate the path
+	TriggerRisk  string     `json:"trigger_risk"` // how/by whom it can be triggered
 	Why          string     `json:"why"`
-	Fix          string     `json:"fix"`                // one-line summary (kept for back-compat)
-	Fixes        []string   `json:"fixes"`              // ordered, concrete action items
+	Fix          string     `json:"fix"`   // one-line summary (kept for back-compat)
+	Fixes        []string   `json:"fixes"` // ordered, concrete action items
 	Score        int        `json:"score"`
+	// Verified is true when this path's boundary secret was tested against
+	// its live provider AND matched a known credential format, i.e. we got a
+	// real valid/invalid answer — not classified by name heuristic alone.
+	// Always false for non-secret boundaries (OIDC role, prod environment),
+	// since those aren't something the verify pipeline tests at all.
+	Verified bool `json:"verified"`
+	// Unrecognized is true when the boundary secret WAS run through the
+	// verify pipeline but its value didn't match any known credential
+	// format, so we couldn't get a real answer (see
+	// verify.SecretVerification.Recognized). This is deliberately distinct
+	// from Verified=false: it means "we tried and don't know", not "we
+	// haven't checked" or "confirmed dead" — treat it as unresolved risk,
+	// not as evidence of anything.
+	Unrecognized bool `json:"unrecognized"`
 }
 
 // ActionItem is a single prioritized remediation.
@@ -48,6 +65,16 @@ type ActionItem struct {
 	Fix      string `json:"fix"`
 	FocusID  string `json:"focus_id"` // graph node to open as the drill-down
 	Score    int    `json:"score"`
+	// Verified is true only for rotate_secret items whose secret was tested
+	// against its live provider AND matched a known credential format —
+	// other kinds (fix_trigger, pin_action) aren't secret-verification
+	// findings at all, so they're always false here.
+	Verified bool `json:"verified"`
+	// Unrecognized mirrors AttackPath.Unrecognized: true only for
+	// rotate_secret items whose secret ran through the verify pipeline but
+	// didn't match any known credential format — an unresolved "we don't
+	// know", not evidence the secret is safe.
+	Unrecognized bool `json:"unrecognized"`
 }
 
 var sevRank = map[string]int{"critical": 4, "high": 3, "medium": 2, "low": 1}
@@ -84,18 +111,18 @@ func (g *Graph) Findings() Findings {
 
 // workflowFacts gathers the reachability + privilege facts for one workflow.
 type wfFacts struct {
-	node           *Node
-	repo, file     string
-	perms          string
-	idToken        bool
-	selfHosted     bool
-	triggers       []string
-	secrets        []*Node
+	node            *Node
+	repo, file      string
+	perms           string
+	idToken         bool
+	selfHosted      bool
+	triggers        []string
+	secrets         []*Node
 	boundarySecrets []*Node // long-lived high-criticality creds = path-to-prod boundaries
-	roles          []*Node
-	prodEnvs       []*Node
-	unpinnedActs   []*Node // all unpinned (incl. first-party)
-	unpinnedRisky  []*Node // unpinned third-party/verified only — the real hijack risk
+	roles           []*Node
+	prodEnvs        []*Node
+	unpinnedActs    []*Node // all unpinned (incl. first-party)
+	unpinnedRisky   []*Node // unpinned third-party/verified only — the real hijack risk
 }
 
 func (g *Graph) workflowFacts(n Node) wfFacts {
@@ -109,6 +136,15 @@ func (g *Graph) workflowFacts(n Node) wfFacts {
 
 	w.secrets = g.outOfType(n.ID, NodeSecret)
 	for _, s := range w.secrets {
+		// Skip only CONFIRMED-dead secrets — a verified-but-unrecognized-format
+		// secret is NOT confirmed dead (see models.OrgSecret.VerifyRecognized),
+		// so it must still be considered as a potential boundary.
+		if verified, _ := s.Meta["verified"].(bool); verified {
+			recognized, _ := s.Meta["verify_recognized"].(bool)
+			if valid, _ := s.Meta["valid"].(bool); recognized && !valid {
+				continue
+			}
+		}
 		if b, _ := s.Meta["boundary"].(bool); b {
 			w.boundarySecrets = append(w.boundarySecrets, s)
 		}
@@ -215,6 +251,8 @@ func (g *Graph) buildPath(w wfFacts) (AttackPath, bool) {
 	// Boundary precedence: OIDC role > prod env > long-lived secret.
 	boundary, btype := "", ""
 	var boundarySecret *Node
+	boundaryVerified := false
+	boundaryUnrecognized := false
 	switch {
 	case len(w.roles) > 0:
 		boundary, btype = w.roles[0].Label, NodeOIDCRole
@@ -223,6 +261,10 @@ func (g *Graph) buildPath(w wfFacts) (AttackPath, bool) {
 	default:
 		boundarySecret = pickBoundarySecret(w.boundarySecrets)
 		boundary, btype = boundarySecret.Label, NodeSecret
+		verified, _ := boundarySecret.Meta["verified"].(bool)
+		recognized, _ := boundarySecret.Meta["verify_recognized"].(bool)
+		boundaryVerified = verified && recognized
+		boundaryUnrecognized = verified && !recognized
 	}
 
 	steps := []PathStep{{Kind: "trigger", Label: trig, Note: triggerNote(dangerous)}}
@@ -268,14 +310,16 @@ func (g *Graph) buildPath(w wfFacts) (AttackPath, bool) {
 		WorkflowID: w.node.ID,
 		Steps:      steps,
 		Boundary:   boundary, BoundaryType: btype,
-		AWSAccount: account,
-		Factors: factors,
-		Trigger:     trig,
-		TriggerRisk: triggerExposure(trig),
-		Why:     pathWhy(dangerous, trig, w),
-		Fix:     pathFix(dangerous, w),
-		Fixes:   pathFixes(dangerous, w),
-		Score:   sevRank[sev]*1000 + len(w.secrets)*10 + len(w.roles)*20 + len(w.unpinnedRisky),
+		AWSAccount:   account,
+		Factors:      factors,
+		Trigger:      trig,
+		TriggerRisk:  triggerExposure(trig),
+		Why:          pathWhy(dangerous, trig, w),
+		Fix:          pathFix(dangerous, w),
+		Fixes:        pathFixes(dangerous, w),
+		Score:        sevRank[sev]*1000 + len(w.secrets)*10 + len(w.roles)*20 + len(w.unpinnedRisky),
+		Verified:     boundaryVerified,
+		Unrecognized: boundaryUnrecognized,
 	}, true
 }
 
@@ -376,40 +420,99 @@ func (g *Graph) actionActions() []ActionItem {
 }
 
 // secretActions emits "rotate / scope this secret" items for high-blast-radius
-// or org-wide secrets.
+// or org-wide secrets. Verified-invalid secrets are skipped (dead = no threat).
+// Verified-valid secrets get enriched detail with actual identity/permissions.
 func (g *Graph) secretActions() []ActionItem {
 	var out []ActionItem
 	for _, n := range g.Nodes {
 		if n.Type != NodeSecret {
 			continue
 		}
-		wf := g.upstreamTypeCount(n.ID, NodeWorkflow)
-		if wf == 0 {
-			continue
+
+		verified, _ := n.Meta["verified"].(bool)
+		recognized, _ := n.Meta["verify_recognized"].(bool)
+		unrecognized := verified && !recognized
+
+		// Skip only CONFIRMED-dead secrets entirely — no point rotating a
+		// live-tested dead key. An unrecognized-format secret (verified=true
+		// but the value didn't match any known credential pattern) is NOT
+		// confirmed dead — Valid=false there is a placeholder, not evidence —
+		// so it must fall through and be judged on reachability like any
+		// unverified secret.
+		if verified && recognized {
+			if valid, _ := n.Meta["valid"].(bool); !valid {
+				continue
+			}
 		}
+
+		wf := g.upstreamTypeCount(n.ID, NodeWorkflow)
 		repos := g.upstreamTypeCount(n.ID, NodeRepo)
 		scope, _ := n.Meta["scope"].(string)
 		vis, _ := n.Meta["visibility"].(string)
 		orgWide := scope == "org" && vis == "all"
+		tier, _ := n.Meta["verify_permission_tier"].(string)
+		confirmedDangerous := tier == "critical" || tier == "high"
 
 		sev := ""
-		if orgWide || wf >= 20 {
+		switch {
+		case orgWide || wf >= 20:
 			sev = "high"
-		} else if wf >= 5 {
+		case wf >= 5:
 			sev = "medium"
-		} else {
+		case wf == 0 && confirmedDangerous:
+			// Not wired into any currently-scanned workflow, but we've directly
+			// confirmed — not name-guessed — that this credential is highly
+			// privileged. That's real exposure the old reachability-only model
+			// couldn't justify surfacing (a name heuristic alone is too noisy
+			// to flag every unused secret), but actual evidence can.
+			sev = "high"
+		default:
 			continue
 		}
-		detail := "Used by " + plural(wf, "workflow", "workflows") + " across " + plural(repos, "repo", "repos")
+
+		var detail string
+		if wf == 0 {
+			detail = "Not referenced by any currently-scanned workflow"
+		} else {
+			detail = "Used by " + plural(wf, "workflow", "workflows") + " across " + plural(repos, "repo", "repos")
+		}
 		if orgWide {
 			detail += " · org-wide visibility=all"
 		}
+
+		// Enrich with verification data when available. A real permission tier
+		// (what the credential can actually DO, evaluated against the live
+		// provider) is ground truth and overrides the reachability-based
+		// severity above — "many policies attached" was only ever a proxy for
+		// this, and a false one (a key with 3 read-only policies isn't
+		// critical; a key with 1 AdministratorAccess policy is).
+		nodeVerified := verified && recognized
+		if nodeVerified {
+			if identity, _ := n.Meta["verify_identity"].(string); identity != "" {
+				detail += " · identity: " + identity
+			}
+			if perms, ok := n.Meta["verify_permissions"].([]string); ok && len(perms) > 0 {
+				detail += " · policies: " + strings.Join(perms, ", ")
+			}
+			if tier, _ := n.Meta["verify_permission_tier"].(string); tier != "" {
+				sev = tier
+				if reasons, ok := n.Meta["verify_permission_reasons"].([]string); ok && len(reasons) > 0 {
+					detail += " · confirmed: " + strings.Join(reasons, "; ")
+				}
+			}
+		}
+		if unrecognized {
+			detail += " · verification ran but this value didn't match any known credential format — unresolved, not confirmed safe"
+		}
+
 		out = append(out, ActionItem{
 			ID: "act:rotate:" + n.ID, Severity: sev, Kind: "rotate_secret",
 			Title:   "Rotate / scope " + n.Label,
 			Detail:  detail,
 			Fix:     "Rotate the value and narrow scope (environment-scoped secret, or restrict org visibility from 'all' to selected repos).",
 			FocusID: n.ID, Score: sevRank[sev]*1000 + wf,
+			Verified:     nodeVerified,
+			Unrecognized: unrecognized,
 		})
 	}
 	return out

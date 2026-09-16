@@ -30,6 +30,7 @@
   var drillSsoExpiryFilter = ''; // expiry filter applied inside metric-drill when tab=sso
   var actionsTrustFilter = ''; // '' = all, 'first_party', 'verified', 'third_party'
   var secretScopeFilter = ''; // '' = all, 'org', 'repo', 'environment'
+  var verifyingRepos = {};    // repo_name -> true while verification is in progress
   var patsView = 'pats';      // 'pats' | 'requests'
   let secretSort = { col: 'risk', asc: false };
   let dkSort   = { col: 'risk', asc: false };
@@ -840,6 +841,13 @@
     var risks = [], recs = [], level = 'none';
     function bump(l) { var w = { high: 3, medium: 2, low: 1, none: 0 }; if ((w[l]||0) > (w[level]||0)) level = l; }
 
+    // Verified-invalid secrets are dead — minimal risk (skip "unknown" provider, those are just unverifiable)
+    if (secret.verified && !secret.valid && secret.verify_provider !== 'unknown') {
+      risks.push({ severity: 'low', message: 'Verified dead credential (' + (secret.verify_provider || 'unknown') + ')' + (secret.verify_error ? ' — ' + secret.verify_error : '') });
+      recs.push({ action: 'Delete', reason: 'This secret is invalid. Remove it to reduce clutter and avoid confusion.', urgent: false });
+      return { level: 'low', risks: risks, recommendations: recs };
+    }
+
     if (secret.scope === 'org' && secret.visibility === 'all') {
       risks.push({ severity: 'high', message: 'Org-wide secret visible to ALL repositories' });
       recs.push({ action: 'Narrow visibility', reason: 'Limit to selected repos or move to environment-level.', urgent: true });
@@ -867,6 +875,12 @@
       risks.push({ severity: 'medium', message: 'Name suggests high-value credential (' + secret.name + ')' });
       if (level !== 'high') recs.push({ action: 'Use OIDC', reason: 'Replace long-lived secrets with short-lived OIDC tokens where possible.', urgent: false });
       bump('medium');
+    }
+
+    // Verified-valid secrets get an extra note
+    if (secret.verified && secret.valid) {
+      var identNote = secret.verify_identity ? ' as ' + secret.verify_identity : '';
+      risks.push({ severity: level === 'none' ? 'low' : level, message: 'Verified live credential (' + (secret.verify_provider || 'unknown') + ')' + identNote });
     }
 
     if (secret.scope === 'environment') {
@@ -2050,6 +2064,168 @@
     table.appendChild(tbody);
   }
 
+  // --- Secret Verification ---
+
+  function verifyRepo(repoName) {
+    if (verifyingRepos[repoName]) return;
+    verifyingRepos[repoName] = true;
+    renderSecrets(report.secrets);
+
+    fetch('/api/verify-secrets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo: repoName }),
+    }).then(function(resp) {
+      return resp.text().then(function(text) {
+        var data;
+        try { data = JSON.parse(text); } catch(e) {
+          throw new Error('HTTP ' + resp.status + ': ' + text.substring(0, 200));
+        }
+        if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        return data;
+      });
+    }).then(function(result) {
+      if (result.status === 'success' && result.secrets) {
+        var byName = {};
+        result.secrets.forEach(function(sv) { byName[sv.name] = sv; });
+        report.secrets.forEach(function(s) {
+          if (s.repo_name !== repoName) return;
+          var sv = byName[s.name];
+          if (!sv) return;
+          s.verified = true;
+          s.valid = sv.valid;
+          s.verify_provider = sv.provider;
+          s.verify_identity = sv.identity;
+          s.verify_permissions = sv.permissions;
+          s.verify_error = sv.error;
+        });
+      }
+      delete verifyingRepos[repoName];
+      renderSecrets(report.secrets);
+    }).catch(function(err) {
+      delete verifyingRepos[repoName];
+      renderSecrets(report.secrets);
+      alert('Verification failed for ' + repoName + ': ' + (err.message || 'unknown error'));
+    });
+  }
+
+  // verifyOrgSecret verifies one org-level secret via a caller-chosen repo.
+  // Org secrets aren't tied to any repo, so there's no automatic target —
+  // this only requests THIS ONE secret, not every other org secret the
+  // chosen repo happens to be eligible for (a private repo is eligible for
+  // every "private"-visibility org secret at once, which can be a much
+  // wider sweep than intended for a single click).
+  function verifyOrgSecret(secretName, repoName) {
+    var key = 'org:' + secretName;
+    if (verifyingRepos[key]) return;
+    verifyingRepos[key] = true;
+    renderSecrets(report.secrets);
+
+    fetch('/api/verify-org-secrets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo: repoName, secrets: [secretName] }),
+    }).then(function(resp) {
+      return resp.text().then(function(text) {
+        var data;
+        try { data = JSON.parse(text); } catch(e) {
+          throw new Error('HTTP ' + resp.status + ': ' + text.substring(0, 200));
+        }
+        if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        return data;
+      });
+    }).then(function(result) {
+      if (result.status === 'success' && result.secrets) {
+        var byName = {};
+        result.secrets.forEach(function(sv) { byName[sv.name] = sv; });
+        report.secrets.forEach(function(s) {
+          if (s.scope !== 'org') return;
+          var sv = byName[s.name];
+          if (!sv) return;
+          s.verified = true;
+          s.valid = sv.valid;
+          s.verify_provider = sv.provider;
+          s.verify_identity = sv.identity;
+          s.verify_permissions = sv.permissions;
+          s.verify_error = sv.error;
+        });
+      }
+      delete verifyingRepos[key];
+      renderSecrets(report.secrets);
+    }).catch(function(err) {
+      delete verifyingRepos[key];
+      renderSecrets(report.secrets);
+      alert('Org secret verification failed for ' + secretName + ' via ' + repoName + ': ' + (err.message || 'unknown error'));
+    });
+  }
+
+  function verifyAllRepos() {
+    if (!report || !report.secrets) return;
+    var btn = document.getElementById('verify-all-secrets');
+
+    // Collect unverified repos to mark as verifying in the UI.
+    var repos = {};
+    report.secrets.forEach(function(s) {
+      if (s.scope === 'repo' && s.repo_name && !s.verified && !verifyingRepos[s.repo_name]) {
+        repos[s.repo_name] = true;
+      }
+    });
+    var repoList = Object.keys(repos);
+    if (repoList.length === 0) { alert('All repo-scoped secrets are already verified.'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Verifying ' + repoList.length + ' repos…';
+    repoList.forEach(function(r) { verifyingRepos[r] = true; });
+    renderSecrets(report.secrets);
+
+    fetch('/api/verify-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }).then(function(resp) {
+      return resp.text().then(function(text) {
+        var data;
+        try { data = JSON.parse(text); } catch(e) {
+          throw new Error('HTTP ' + resp.status + ': ' + text.substring(0, 200));
+        }
+        if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        return data;
+      });
+    }).then(function(data) {
+      // Enrich client-side report from results.
+      (data.results || []).forEach(function(rr) {
+        delete verifyingRepos[rr.repo];
+        if (rr.result && rr.result.status === 'success' && rr.result.secrets) {
+          var byName = {};
+          rr.result.secrets.forEach(function(sv) { byName[sv.name] = sv; });
+          report.secrets.forEach(function(s) {
+            if (s.repo_name !== rr.repo) return;
+            var sv = byName[s.name];
+            if (!sv) return;
+            s.verified = true;
+            s.valid = sv.valid;
+            s.verify_provider = sv.provider;
+            s.verify_identity = sv.identity;
+            s.verify_permissions = sv.permissions;
+            s.verify_error = sv.error;
+          });
+        }
+      });
+      // Refresh full report for updated risk/attack-path data.
+      return fetchJSON('/api/report');
+    }).then(function(freshReport) {
+      report = freshReport;
+      renderSecrets(report.secrets);
+      btn.disabled = false;
+      btn.textContent = 'Verify All';
+    }).catch(function(err) {
+      Object.keys(verifyingRepos).forEach(function(r) { delete verifyingRepos[r]; });
+      renderSecrets(report.secrets);
+      btn.disabled = false;
+      btn.textContent = 'Verify All';
+      alert('Verify All failed: ' + (err.message || 'unknown error'));
+    });
+  }
+
   // --- Secrets ---
 
   function renderSecrets(secrets) {
@@ -2070,6 +2246,7 @@
       { key: 'visibility', label: 'Visibility' },
       { key: 'updated_at', label: 'Last Updated' },
       { key: 'created_by', label: 'Created By' },
+      { key: '', label: 'Status' },
       { key: '', label: 'Risk' },
       { key: '', label: 'Actions' },
     ];
@@ -2138,6 +2315,32 @@
       }
       tr.appendChild(creatorCell);
 
+      // Verification status
+      var statusCell = document.createElement('td');
+      if (s.verified && s.verify_provider === 'unknown') {
+        statusCell.textContent = 'N/A';
+        statusCell.style.color = 'var(--text-muted)';
+        statusCell.title = 'No verifiable credential pattern detected';
+      } else if (s.verified) {
+        var statusBadge = document.createElement('span');
+        statusBadge.className = 'verify-status ' + (s.valid ? 'valid' : 'invalid');
+        statusBadge.textContent = s.valid ? 'Live' : 'Dead';
+        statusCell.appendChild(statusBadge);
+      } else if (verifyingRepos[s.repo_name] || (s.scope === 'org' && verifyingRepos['org:' + s.name])) {
+        var statusBadge = document.createElement('span');
+        statusBadge.className = 'verify-status pending';
+        statusBadge.textContent = 'Verifying…';
+        statusCell.appendChild(statusBadge);
+      } else if (s.scope === 'repo' || s.scope === 'environment' || s.scope === 'org') {
+        statusCell.style.color = 'var(--text-muted)';
+        statusCell.style.fontSize = '11px';
+        statusCell.textContent = 'Unverified';
+      } else {
+        statusCell.textContent = '—';
+        statusCell.style.color = 'var(--text-muted)';
+      }
+      tr.appendChild(statusCell);
+
       var riskCell = document.createElement('td');
       var riskBadge = document.createElement('span');
       riskBadge.className = 'risk-badge-inline ' + assessment.level;
@@ -2145,9 +2348,51 @@
       riskCell.appendChild(riskBadge);
       tr.appendChild(riskCell);
 
-      // Delete button
+      // Action buttons
       var actCell = document.createElement('td');
       actCell.style.whiteSpace = 'nowrap';
+
+      // Verify button (repo- or environment-scoped, unverified — detection is
+      // value-based, not name-based; verifying any secret on a repo also
+      // verifies the rest of that repo's repo- and environment-scoped secrets
+      // in the same pass, since they're all pushed in one workflow run).
+      if ((s.scope === 'repo' || s.scope === 'environment') && s.repo_name && !s.verified) {
+        var verifyBtn = document.createElement('button');
+        verifyBtn.className = 'action-btn verify';
+        verifyBtn.textContent = verifyingRepos[s.repo_name] ? 'Verifying…' : 'Verify';
+        verifyBtn.disabled = !!verifyingRepos[s.repo_name];
+        verifyBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          verifyRepo(s.repo_name);
+        });
+        actCell.appendChild(verifyBtn);
+      }
+
+      // Verify button (org-scoped) — org secrets aren't tied to a repo, so
+      // ask which repo to use as the verification vehicle. Only this one
+      // secret is requested, not every other org secret that repo happens
+      // to also be eligible for.
+      if (s.scope === 'org' && !s.verified) {
+        var verifyOrgBtn = document.createElement('button');
+        verifyOrgBtn.className = 'action-btn verify';
+        var orgKey = 'org:' + s.name;
+        verifyOrgBtn.textContent = verifyingRepos[orgKey] ? 'Verifying…' : 'Verify via repo…';
+        verifyOrgBtn.disabled = !!verifyingRepos[orgKey];
+        verifyOrgBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var repoName = prompt(
+            'Org secret "' + s.name + '" (visibility: ' + s.visibility + ') isn\'t tied to a repo.\n\n' +
+            'Enter a repo to use as the verification vehicle. It must actually be eligible to see ' +
+            'this secret (any repo for "all", any private repo for "private", or one on this ' +
+            'secret\'s specific allowlist for "selected") — an ineligible repo will just come back ' +
+            'with an error, not a false result.'
+          );
+          if (!repoName) return;
+          verifyOrgSecret(s.name, repoName.trim());
+        });
+        actCell.appendChild(verifyOrgBtn);
+      }
+
       var deleteBtn = document.createElement('button');
       deleteBtn.className = 'action-btn deny';
       deleteBtn.textContent = 'Delete';
@@ -2181,7 +2426,7 @@
       tr.appendChild(actCell);
 
       tr.addEventListener('click', function() {
-        toggleDetailRow(tr, function() { return renderSecretDetailPanel(s, 9); });
+        toggleDetailRow(tr, function() { return renderSecretDetailPanel(s, 10); });
       });
 
       tbody.appendChild(tr);
@@ -3004,6 +3249,7 @@
   setupFilter('pats-filter', renderPATs, 'pats');
   setupFilter('apps-filter', function(apps) { appPage = 1; renderApps(apps); }, 'apps');
   setupFilter('sso-filter', function(creds) { ssoPage = 1; renderSSOCredentials(creds); }, 'sso_credentials');
+  document.getElementById('verify-all-secrets').addEventListener('click', function() { verifyAllRepos(); });
   setupFilter('secrets-filter', function(s) { secretPage = 1; renderSecrets(s); }, 'secrets');
   setupFilter('deploy-keys-filter', renderDeployKeys, 'deploy_keys');
   setupFilter('workflow-perms-filter', function(p) { wpPage = 1; renderWorkflowPerms(p); }, 'workflow_permissions');
@@ -3525,6 +3771,21 @@
       buildRecommendationsSection(assessment),
     ];
     if (scenarios.length > 0) sections.push(buildSupplyChainSection(scenarios));
+
+    // Verification results section
+    if (secret.verified) {
+      var verifyItems = [
+        { label: 'Status', value: secret.valid ? 'Valid (live credential)' : 'Invalid (dead credential)', cls: secret.valid ? '' : 'danger' },
+        { label: 'Provider', value: secret.verify_provider || 'unknown' },
+      ];
+      if (secret.verify_identity) verifyItems.push({ label: 'Identity', value: secret.verify_identity });
+      if (secret.verify_error) verifyItems.push({ label: 'Error', value: secret.verify_error, cls: 'danger' });
+      if (secret.verify_permissions && secret.verify_permissions.length > 0) {
+        verifyItems.push({ label: 'Permissions', value: secret.verify_permissions.join(', ') });
+      }
+      sections.push(buildMetaSection('Verification Results', verifyItems));
+    }
+
     sections.push(buildMetaSection('Secret Details', metaItems));
 
     return buildDetailPanel(colSpan, sections);
@@ -4290,22 +4551,96 @@
     });
   }
 
-  // loadFindings renders the insight-first hero: ranked attack paths to
-  // production and prioritized action items. Clicking a row drills into the
-  // (small, aggregated) graph below.
+  // loadFindings renders the insight-first hero: ONE ranked list mixing attack
+  // paths to production and prioritized action items, highest score first —
+  // previously these were two separately-headed, separately-scrolled sections,
+  // which meant the single scariest thing in the org (whichever list it landed
+  // in) could be easy to miss below whichever section happened to render first.
+  // Clicking a row drills into the (small, aggregated) graph below.
+  // findingsFilterState persists across re-renders (toggle clicks) but resets
+  // to 'all' on a fresh page load / rescan, which is the sensible default.
+  // Four states, not three: 'unrecognized' is deliberately distinct from
+  // 'unverified' — it means the verify pipeline ran but the secret's value
+  // didn't match any known credential format (SSH key, webhook URL, plain
+  // config value, etc.), so we genuinely don't know if it's live. That's
+  // NOT the same as "never checked" (unverified) or "confirmed answer"
+  // (verified) — conflating it with either would misrepresent what we
+  // actually know. See AttackPath.Unrecognized / ActionItem.Unrecognized.
+  var findingsFilterState = 'all'; // 'all' | 'verified' | 'unrecognized' | 'unverified'
+
   function loadFindings() {
     var host = document.getElementById('graph-findings');
     if (!host) return;
     host.innerHTML = '<div class="findings-loading">Analyzing attack paths…</div>';
     fetchJSON('/api/attack-graph/findings').then(function(f) {
       if (!f) { host.innerHTML = ''; return; }
-      host.innerHTML = '';
-      host.appendChild(findingsSection('☁ Attack Paths to Production', f.paths || [], renderPathRow,
-        'No workflow reaches a production boundary (OIDC role or prod environment).'));
-      host.appendChild(findingsSection('🛠 Prioritized Action Items', f.actions || [], renderActionRow,
-        'No action items surfaced.'));
+      var merged = []
+        .concat((f.paths || []).map(function(p) { p._kind = 'path'; return p; }))
+        .concat((f.actions || []).map(function(a) { a._kind = 'action'; return a; }));
+      merged.sort(function(x, y) { return (y.score || 0) - (x.score || 0); });
+      renderFindingsHost(host, merged);
+      // Delegated on `host` itself, so it survives the innerHTML swaps that
+      // happen on every filter-toggle re-render below — wire it only once.
       wireFindingRows(host);
     }).catch(function() { host.innerHTML = '<div class="findings-loading">Failed to load findings.</div>'; });
+  }
+
+  // renderFindingsHost (re)paints the filter bar + findings list for the
+  // current findingsFilterState, without refetching from the server.
+  function renderFindingsHost(host, merged) {
+    host.innerHTML = '';
+    host.appendChild(findingsFilterBar(merged, function(next) {
+      findingsFilterState = next;
+      renderFindingsHost(host, merged);
+    }));
+    var filtered = merged.filter(function(it) {
+      if (findingsFilterState === 'verified') return !!it.verified;
+      if (findingsFilterState === 'unrecognized') return !!it.unrecognized;
+      if (findingsFilterState === 'unverified') return !it.verified && !it.unrecognized;
+      return true;
+    });
+    var emptyMsgs = {
+      all: 'No findings surfaced — nothing reaches a production boundary and no action items were flagged.',
+      verified: 'No verified findings — try the All view.',
+      unrecognized: 'No unrecognized-format findings — try the All view.',
+      unverified: 'No unverified findings — try the All view.'
+    };
+    host.appendChild(findingsSection('🎯 Top Findings', filtered, renderFindingRow, emptyMsgs[findingsFilterState]));
+  }
+
+  // findingsFilterBar renders the All / Verified / Unrecognized / Unverified
+  // toggle:
+  //   Verified     — the finding's boundary secret was live-tested AND
+  //                  matched a known credential format (a real answer).
+  //   Unrecognized — live-tested, but the value didn't match any format we
+  //                  check for. An honest "we don't know", not a clean bill
+  //                  of health — don't read it as safe.
+  //   Unverified   — never run through the verify pipeline at all.
+  function findingsFilterBar(merged, onChange) {
+    var verifiedCount = 0, unrecognizedCount = 0;
+    merged.forEach(function(it) {
+      if (it.verified) verifiedCount++;
+      else if (it.unrecognized) unrecognizedCount++;
+    });
+    var counts = {
+      all: merged.length, verified: verifiedCount, unrecognized: unrecognizedCount,
+      unverified: merged.length - verifiedCount - unrecognizedCount
+    };
+    var labels = { all: 'All', verified: 'Verified', unrecognized: 'Unrecognized', unverified: 'Unverified' };
+    var bar = document.createElement('div');
+    bar.className = 'findings-filter-bar';
+    bar.innerHTML = ['all', 'verified', 'unrecognized', 'unverified'].map(function(key) {
+      return '<button type="button" class="findings-filter-btn' + (findingsFilterState === key ? ' active' : '') + '" data-filter="' + key + '">' +
+        gEsc(labels[key]) + ' <span class="ff-count">' + counts[key] + '</span></button>';
+    }).join('');
+    bar.querySelectorAll('.findings-filter-btn').forEach(function(b) {
+      b.addEventListener('click', function() { onChange(b.getAttribute('data-filter')); });
+    });
+    return bar;
+  }
+
+  function renderFindingRow(item) {
+    return item._kind === 'path' ? renderPathRow(item) : renderActionRow(item);
   }
 
   var FINDINGS_PAGE_SIZE = 10;
