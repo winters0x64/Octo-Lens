@@ -79,15 +79,44 @@ type SSOCredential struct {
 
 // OrgSecret represents an Actions secret at org, repo, or environment level.
 type OrgSecret struct {
-	Name       string     `json:"name"`
-	Scope      string     `json:"scope"`       // "org", "repo", "environment"
-	Visibility string     `json:"visibility"`   // "all", "private", "selected" (org-level only)
-	RepoName   string     `json:"repo_name"`    // empty for org-level
-	EnvName    string     `json:"env_name"`     // set for environment secrets
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	Risk       RiskLevel  `json:"risk"`
-	CreatedBy  string     `json:"created_by"`  // from audit log; empty if >90 days or Enterprise not available
+	Name       string    `json:"name"`
+	Scope      string    `json:"scope"`      // "org", "repo", "environment"
+	Visibility string    `json:"visibility"` // "all", "private", "selected" (org-level only)
+	RepoName   string    `json:"repo_name"`  // empty for org-level
+	EnvName    string    `json:"env_name"`   // set for environment secrets
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Risk       RiskLevel `json:"risk"`
+	CreatedBy  string    `json:"created_by"` // from audit log; empty if >90 days or Enterprise not available
+
+	// Verification results (populated by the in-place verify pipeline).
+	// When Verified is true, Valid/VerifyProvider/VerifyIdentity/VerifyPerms
+	// reflect actual provider-API validation — not heuristic name matching.
+	Verified       bool       `json:"verified"`
+	Valid          bool       `json:"valid"`
+	VerifyProvider string     `json:"verify_provider,omitempty"` // aws, github, anthropic, openai, stripe, slack, gemini, npm, sonarcloud, unknown
+	VerifyIdentity string     `json:"verify_identity,omitempty"` // ARN, login, bot name, etc.
+	VerifyPerms    []string   `json:"verify_permissions,omitempty"`
+	VerifyError    string     `json:"verify_error,omitempty"`
+	VerifiedAt     *time.Time `json:"verified_at,omitempty"`
+
+	// VerifyRecognized is true when the secret's live value matched a known
+	// credential format, so Valid reflects a real answer from the provider.
+	// When false (Verified is still true — the pipeline ran), the value
+	// didn't match anything we know how to check: Valid comes back false by
+	// convention, but that must NOT be read as "confirmed dead" — it's an
+	// honest "we don't know" (e.g. an SSH key, an internal webhook URL, or a
+	// config value that isn't a credential at all). Only Verified &&
+	// VerifyRecognized && !Valid means a confirmed-dead credential.
+	VerifyRecognized bool `json:"verify_recognized"`
+
+	// PermissionTier is what the credential can actually DO, classified from
+	// its real permissions (see verify.ClassifyPermissionTier) — critical,
+	// high, medium, low, or unknown. Only meaningful when Verified && Valid;
+	// this is the ground-truth signal the attack-surface graph should prefer
+	// over name-based heuristics whenever it's present.
+	VerifyPermissionTier    string   `json:"verify_permission_tier,omitempty"`
+	VerifyPermissionReasons []string `json:"verify_permission_reasons,omitempty"`
 }
 
 // DeployKey represents an SSH deploy key on a repository.
@@ -104,44 +133,44 @@ type DeployKey struct {
 
 // WorkflowPermission captures the default GITHUB_TOKEN permission for a repository.
 type WorkflowPermission struct {
-	RepoName                   string    `json:"repo_name"`
-	DefaultPermission          string    `json:"default_permission"`          // "read" or "write"
-	CanApprovePRs              bool      `json:"can_approve_pull_requests"`
-	Risk                       RiskLevel `json:"risk"`
+	RepoName          string    `json:"repo_name"`
+	DefaultPermission string    `json:"default_permission"` // "read" or "write"
+	CanApprovePRs     bool      `json:"can_approve_pull_requests"`
+	Risk              RiskLevel `json:"risk"`
 }
 
 // ActionRef is a single `uses:` reference extracted from a workflow, with its
 // pinning status. Kind distinguishes marketplace actions from reusable
 // workflows, container actions, and local actions.
 type ActionRef struct {
-	Raw    string `json:"raw"`              // original ref, e.g. "actions/checkout@v4"
-	Owner  string `json:"owner"`            // "actions" (empty for local/docker)
-	Name   string `json:"name"`             // "checkout" (repo or repo/path for reusable)
-	Ref    string `json:"ref"`              // tag/branch/SHA after @
-	SHA    string `json:"sha,omitempty"`    // set when Ref is a 40-char commit SHA
-	Pinned bool   `json:"pinned"`           // true when pinned to a full commit SHA
-	Kind   string `json:"kind"`             // "marketplace" | "reusable_workflow" | "docker" | "local"
+	Raw    string `json:"raw"`           // original ref, e.g. "actions/checkout@v4"
+	Owner  string `json:"owner"`         // "actions" (empty for local/docker)
+	Name   string `json:"name"`          // "checkout" (repo or repo/path for reusable)
+	Ref    string `json:"ref"`           // tag/branch/SHA after @
+	SHA    string `json:"sha,omitempty"` // set when Ref is a 40-char commit SHA
+	Pinned bool   `json:"pinned"`        // true when pinned to a full commit SHA
+	Kind   string `json:"kind"`          // "marketplace" | "reusable_workflow" | "docker" | "local"
 }
 
 // WorkflowFile represents a parsed workflow YAML with permission findings and
 // the structured supply-chain facts needed for blast-radius analysis.
 type WorkflowFile struct {
-	RepoName        string    `json:"repo_name"`
-	FileName        string    `json:"file_name"`
-	Path            string    `json:"path"`
-	Permissions     string    `json:"permissions"`      // raw permissions string or "write-all", "read-all", "not set"
-	HasPinnedActions bool     `json:"has_pinned_actions"`
-	UnpinnedActions  []string `json:"unpinned_actions"` // retained for back-compat (derived from Actions)
-	Risk            RiskLevel `json:"risk"`
+	RepoName         string    `json:"repo_name"`
+	FileName         string    `json:"file_name"`
+	Path             string    `json:"path"`
+	Permissions      string    `json:"permissions"` // raw permissions string or "write-all", "read-all", "not set"
+	HasPinnedActions bool      `json:"has_pinned_actions"`
+	UnpinnedActions  []string  `json:"unpinned_actions"` // retained for back-compat (derived from Actions)
+	Risk             RiskLevel `json:"risk"`
 
 	// Structured extraction (blast-radius graph inputs).
-	Actions      []ActionRef `json:"actions,omitempty"`        // every uses: ref, pinned and unpinned
-	SecretRefs   []string    `json:"secret_refs,omitempty"`    // ${{ secrets.NAME }} names; "*" = dynamic/all
-	Environments []string    `json:"environments,omitempty"`   // job-level environment: values
-	OIDCRoles    []string    `json:"oidc_roles,omitempty"`     // cloud role ARNs / WIF providers requested
-	Triggers     []string    `json:"triggers,omitempty"`       // on: event keys
-	IDTokenWrite bool        `json:"id_token_write"`           // OIDC: id-token: write present
-	SelfHosted   bool        `json:"self_hosted"`              // any runs-on: self-hosted
+	Actions      []ActionRef `json:"actions,omitempty"`      // every uses: ref, pinned and unpinned
+	SecretRefs   []string    `json:"secret_refs,omitempty"`  // ${{ secrets.NAME }} names; "*" = dynamic/all
+	Environments []string    `json:"environments,omitempty"` // job-level environment: values
+	OIDCRoles    []string    `json:"oidc_roles,omitempty"`   // cloud role ARNs / WIF providers requested
+	Triggers     []string    `json:"triggers,omitempty"`     // on: event keys
+	IDTokenWrite bool        `json:"id_token_write"`         // OIDC: id-token: write present
+	SelfHosted   bool        `json:"self_hosted"`            // any runs-on: self-hosted
 
 	// External SAST findings from zizmor (offline audit).
 	ZizmorFindings []ZizmorFinding `json:"zizmor_findings,omitempty"`
@@ -149,7 +178,7 @@ type WorkflowFile struct {
 
 // ZizmorFinding is a single static-analysis finding from zizmor for a workflow.
 type ZizmorFinding struct {
-	RuleID     string `json:"rule_id"`    // zizmor "ident", e.g. "template-injection"
+	RuleID     string `json:"rule_id"` // zizmor "ident", e.g. "template-injection"
 	Desc       string `json:"desc"`
 	URL        string `json:"url"`        // link to the audit's documentation
 	Severity   string `json:"severity"`   // informational | low | medium | high (lowercased)
@@ -158,63 +187,63 @@ type ZizmorFinding struct {
 }
 
 type OrgSummary struct {
-	TotalPATs          int `json:"total_pats"`
-	ActivePATs         int `json:"active_pats"`
-	ExpiredPATs        int `json:"expired_pats"`
-	ExpiringSoon       int `json:"expiring_soon"`
-	PendingRequests    int `json:"pending_requests"`
-	TotalApps          int `json:"total_apps"`
-	HighRiskApps       int `json:"high_risk_apps"`
-	AllRepoAccessPATs  int `json:"all_repo_access_pats"`
-	AllRepoAccessApps  int `json:"all_repo_access_apps"`
-	SSOCredentials     int `json:"sso_credentials"`
-	SSOClassicPATs     int `json:"sso_classic_pats"`
-	SSOSSHKeys         int `json:"sso_ssh_keys"`
+	TotalPATs         int `json:"total_pats"`
+	ActivePATs        int `json:"active_pats"`
+	ExpiredPATs       int `json:"expired_pats"`
+	ExpiringSoon      int `json:"expiring_soon"`
+	PendingRequests   int `json:"pending_requests"`
+	TotalApps         int `json:"total_apps"`
+	HighRiskApps      int `json:"high_risk_apps"`
+	AllRepoAccessPATs int `json:"all_repo_access_pats"`
+	AllRepoAccessApps int `json:"all_repo_access_apps"`
+	SSOCredentials    int `json:"sso_credentials"`
+	SSOClassicPATs    int `json:"sso_classic_pats"`
+	SSOSSHKeys        int `json:"sso_ssh_keys"`
 
 	// New credential metrics
-	TotalSecrets          int `json:"total_secrets"`
-	OrgSecrets            int `json:"org_secrets"`
-	OrgWideSecrets        int `json:"org_wide_secrets"`
-	TotalDeployKeys       int `json:"total_deploy_keys"`
-	WriteDeployKeys       int `json:"write_deploy_keys"`
-	TotalReposScanned     int `json:"total_repos_scanned"`
-	WriteAllWorkflows     int `json:"write_all_workflows"`
-	UnpinnedActionRepos   int `json:"unpinned_action_repos"`
+	TotalSecrets        int `json:"total_secrets"`
+	OrgSecrets          int `json:"org_secrets"`
+	OrgWideSecrets      int `json:"org_wide_secrets"`
+	TotalDeployKeys     int `json:"total_deploy_keys"`
+	WriteDeployKeys     int `json:"write_deploy_keys"`
+	TotalReposScanned   int `json:"total_repos_scanned"`
+	WriteAllWorkflows   int `json:"write_all_workflows"`
+	UnpinnedActionRepos int `json:"unpinned_action_repos"`
 }
 
 type OrgReport struct {
-	Org             string              `json:"org"`
-	ScannedAt       time.Time           `json:"scanned_at"`
-	PATs            []PATInfo           `json:"pats"`
-	PendingRequests []PATRequest        `json:"pending_requests"`
-	Apps            []AppInstallation   `json:"apps"`
-	SSOCredentials  []SSOCredential     `json:"sso_credentials"`
-	Secrets         []OrgSecret         `json:"secrets"`
-	DeployKeys      []DeployKey         `json:"deploy_keys"`
+	Org             string               `json:"org"`
+	ScannedAt       time.Time            `json:"scanned_at"`
+	PATs            []PATInfo            `json:"pats"`
+	PendingRequests []PATRequest         `json:"pending_requests"`
+	Apps            []AppInstallation    `json:"apps"`
+	SSOCredentials  []SSOCredential      `json:"sso_credentials"`
+	Secrets         []OrgSecret          `json:"secrets"`
+	DeployKeys      []DeployKey          `json:"deploy_keys"`
 	WorkflowPerms   []WorkflowPermission `json:"workflow_permissions"`
-	WorkflowFiles   []WorkflowFile      `json:"workflow_files"`
-	Summary         OrgSummary          `json:"summary"`
+	WorkflowFiles   []WorkflowFile       `json:"workflow_files"`
+	Summary         OrgSummary           `json:"summary"`
 }
 
 // AuditLogEntry represents a PAT-related event from the org audit log.
 type AuditLogEntry struct {
-	Action    string     `json:"action"`
-	Actor     string     `json:"actor"`
-	CreatedAt time.Time  `json:"created_at"`
-	TokenID   int64      `json:"token_id,omitempty"`
-	TokenName string     `json:"token_name,omitempty"`
-	User      string     `json:"user,omitempty"`
-	Message   string     `json:"message,omitempty"`
+	Action    string    `json:"action"`
+	Actor     string    `json:"actor"`
+	CreatedAt time.Time `json:"created_at"`
+	TokenID   int64     `json:"token_id,omitempty"`
+	TokenName string    `json:"token_name,omitempty"`
+	User      string    `json:"user,omitempty"`
+	Message   string    `json:"message,omitempty"`
 }
 
 // ComplianceCheck represents an org-level security posture check.
 type ComplianceCheck struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`  // "pass", "fail", "warn", "unknown"
-	Detail      string    `json:"detail"`
-	FixURL      string    `json:"fix_url"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      string `json:"status"` // "pass", "fail", "warn", "unknown"
+	Detail      string `json:"detail"`
+	FixURL      string `json:"fix_url"`
 }
 
 // CategorizePermission determines the risk level of a permission based on its name and access level.

@@ -12,14 +12,23 @@ import (
 
 	ghservice "github.com/th3-j0ik3r/github-pat-monitor/internal/github"
 	"github.com/th3-j0ik3r/github-pat-monitor/internal/models"
+	"github.com/th3-j0ik3r/github-pat-monitor/internal/verify"
 )
 
 type Scanner struct {
-	gh *ghservice.GitHubService
+	gh     *ghservice.GitHubService
+	org    string
+	verify bool // run in-place secret verification
 }
 
 func New(gh *ghservice.GitHubService) *Scanner {
 	return &Scanner{gh: gh}
+}
+
+// SetVerify enables the in-place secret verification pipeline.
+func (s *Scanner) SetVerify(org string, enabled bool) {
+	s.org = org
+	s.verify = enabled
 }
 
 // Result is the structured outcome of one scan. Per-phase completion flags
@@ -28,17 +37,18 @@ func New(gh *ghservice.GitHubService) *Scanner {
 type Result struct {
 	Report *models.OrgReport
 
-	PATsComplete         bool
-	PATRequestsComplete  bool
-	AppsComplete         bool
-	SSOComplete          bool
-	ReposListed          bool
-	ReposScanned         []string
-	SecretsComplete      bool
-	DeployKeysComplete   bool
+	PATsComplete          bool
+	PATRequestsComplete   bool
+	AppsComplete          bool
+	SSOComplete           bool
+	ReposListed           bool
+	ReposScanned          []string
+	SecretsComplete       bool
+	DeployKeysComplete    bool
 	WorkflowPermsComplete bool
 	WorkflowFilesComplete bool
 	ZizmorComplete        bool
+	VerifyComplete        bool
 
 	// PhaseErrors collects per-phase failures without aborting the scan.
 	PhaseErrors []error
@@ -217,6 +227,14 @@ func (s *Scanner) Scan(ctx context.Context) (*Result, error) {
 				res.ReposScanned = append(res.ReposScanned, *r.FullName)
 			}
 		}
+
+		// Phase 3: In-place secret verification (optional, slow).
+		if s.verify && res.SecretsComplete && len(secrets) > 0 {
+			log.Printf("[verify] starting secret verification for %d secrets across repos", len(secrets))
+			secrets = s.verifySecrets(ctx, secrets)
+			res.VerifyComplete = true
+			log.Printf("[verify] secret verification complete")
+		}
 	}
 
 	// If absolutely nothing succeeded, surface a hard error so callers can
@@ -261,6 +279,125 @@ type errPhase struct {
 
 func (e errPhase) Error() string { return e.phase + ": " + e.err.Error() }
 func (e errPhase) Unwrap() error { return e.err }
+
+// verifySecrets runs the in-place verification pipeline: for each repo that has
+// secrets, push a verification workflow, collect results, and enrich the secret
+// list with actual validity/permissions data.
+func (s *Scanner) verifySecrets(ctx context.Context, secrets []models.OrgSecret) []models.OrgSecret {
+	orch := verify.NewOrchestrator(s.org, s.gh.Client())
+
+	// Group by repo: repo-scoped secret names, and environment-scoped secret
+	// names further grouped by environment (org-level secrets need a temp
+	// repo and are skipped for now).
+	repoNamesByRepo := map[string][]string{}
+	envNamesByRepo := map[string]map[string][]string{} // repo -> env -> names
+	for _, sec := range secrets {
+		if sec.RepoName == "" {
+			continue
+		}
+		switch sec.Scope {
+		case "repo":
+			repoNamesByRepo[sec.RepoName] = append(repoNamesByRepo[sec.RepoName], sec.Name)
+		case "environment":
+			if envNamesByRepo[sec.RepoName] == nil {
+				envNamesByRepo[sec.RepoName] = map[string][]string{}
+			}
+			envNamesByRepo[sec.RepoName][sec.EnvName] = append(envNamesByRepo[sec.RepoName][sec.EnvName], sec.Name)
+		}
+	}
+
+	repos := map[string]bool{}
+	for repo := range repoNamesByRepo {
+		repos[repo] = true
+	}
+	for repo := range envNamesByRepo {
+		repos[repo] = true
+	}
+
+	// Run verification per repo (sequential — each pushes a branch).
+	// Keyed by repo -> "scope|env|name" -> result (env is "" for repo scope).
+	now := time.Now()
+	verifyResults := map[string]map[string]*verify.SecretVerification{}
+
+	for repo := range repos {
+		var envGroups []verify.EnvironmentSecrets
+		for envName, names := range envNamesByRepo[repo] {
+			envGroups = append(envGroups, verify.EnvironmentSecrets{EnvName: envName, Names: names})
+		}
+
+		result, err := orch.VerifyRepo(ctx, repo, repoNamesByRepo[repo], envGroups)
+		if err != nil {
+			log.Printf("[verify] WARNING: %s failed: %v", repo, err)
+			continue
+		}
+		if result.Status != "success" {
+			continue
+		}
+		m := map[string]*verify.SecretVerification{}
+		for i := range result.Secrets {
+			sv := &result.Secrets[i]
+			m[sv.Environment+"|"+sv.Name] = sv
+		}
+		verifyResults[repo] = m
+	}
+
+	// Enrich secrets with verification data.
+	for i := range secrets {
+		sec := &secrets[i]
+		repo := sec.RepoName
+		if repo == "" || (sec.Scope != "repo" && sec.Scope != "environment") {
+			continue
+		}
+		rm, ok := verifyResults[repo]
+		if !ok {
+			continue
+		}
+		key := sec.EnvName + "|" + sec.Name
+		sv, ok := rm[key]
+		if !ok {
+			continue
+		}
+		sec.Verified = true
+		sec.Valid = sv.Valid
+		sec.VerifyProvider = sv.Provider
+		sec.VerifyIdentity = sv.Identity
+		sec.VerifyPerms = sv.Permissions
+		sec.VerifyError = sv.Error
+		sec.VerifiedAt = &now
+		sec.VerifyRecognized = sv.Recognized
+
+		// Adjust risk based on actual verification — a real permission tier
+		// (what the credential can actually DO, not just "has policies
+		// attached") is ground truth and should override the name-based
+		// heuristic that produced sec.Risk during the scan.
+		switch {
+		case !sv.Recognized:
+			// The value didn't match any credential format we check — we
+			// have no real answer either way, so leave the name-based
+			// heuristic risk alone rather than misreading "unrecognized" as
+			// "confirmed dead" (sv.Valid is false here by convention, but
+			// that's not evidence of anything).
+		case !sv.Valid:
+			sec.Risk = models.RiskLow // confirmed-dead secret = no real threat
+		default:
+			tier, reasons := verify.ClassifyPermissionTier(sv.Provider, sv.Permissions, sv.PermissionNotes)
+			sec.VerifyPermissionTier = tier
+			sec.VerifyPermissionReasons = reasons
+			switch tier {
+			case verify.TierCritical, verify.TierHigh:
+				sec.Risk = models.RiskHigh
+			case verify.TierMedium:
+				sec.Risk = models.RiskMedium
+			case verify.TierLow:
+				sec.Risk = models.RiskLow
+				// TierUnknown: leave the existing name-based risk alone — we
+				// genuinely don't know this credential's permission scope.
+			}
+		}
+	}
+
+	return secrets
+}
 
 func computeSummary(
 	pats []models.PATInfo,
