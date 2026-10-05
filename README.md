@@ -1,6 +1,7 @@
+
 # Octo Lens
 
-**▶ [Watch the launch video](https://cdn.jsdelivr.net/gh/winters0x64/Octo-Lens@979889f931a1a7ea29a73c671b355649314622c9/docs/octo-final.mp4)**
+https://github.com/user-attachments/assets/d0652866-d322-4900-9e81-bbef1e5dccca
 
 Attack-surface mapping for every non-human identity in your GitHub organization —
 fine-grained PATs, classic PATs, installed Apps, Actions secrets, deploy keys,
