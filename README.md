@@ -1,5 +1,13 @@
 # Octo Lens
 
+<p align="center">
+  <a href="docs/octo-lens.mp4">
+    <img src="docs/octo-lens-thumb.jpg" alt="Octo Lens launch video — click to play" width="800">
+  </a>
+  <br>
+  <sub>▶ <a href="docs/octo-lens.mp4"><b>Watch the 1-minute launch video</b></a></sub>
+</p>
+
 Attack-surface mapping for every non-human identity in your GitHub organization —
 fine-grained PATs, classic PATs, installed Apps, Actions secrets, deploy keys,
 `GITHUB_TOKEN` defaults, and workflow configuration. Octo Lens doesn't just
