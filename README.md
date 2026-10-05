@@ -1,11 +1,11 @@
 # Octo Lens
 
 <p align="center">
-  <a href="docs/octo-lens.mp4">
+  <a href="https://cdn.jsdelivr.net/gh/winters0x64/Octo-Lens@1ddd83d5e9e480897d525cc25021f99806446850/docs/octo-lens.mp4">
     <img src="docs/octo-lens-thumb.jpg" alt="Octo Lens launch video — click to play" width="800">
   </a>
   <br>
-  <sub>▶ <a href="docs/octo-lens.mp4"><b>Watch the 1-minute launch video</b></a></sub>
+  <sub>▶ <a href="https://cdn.jsdelivr.net/gh/winters0x64/Octo-Lens@1ddd83d5e9e480897d525cc25021f99806446850/docs/octo-lens.mp4"><b>Watch the 1-minute launch video</b></a></sub>
 </p>
 
 Attack-surface mapping for every non-human identity in your GitHub organization —
